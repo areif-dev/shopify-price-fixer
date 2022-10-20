@@ -264,67 +264,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut products: Vec<Vec<Product>> = Vec::new();
-    let mut new_list_end = 0;
-    for line in file.lines().map(|l| l.to_uppercase()) {
-        if line.contains("ITEM # & DESCRIPTION") {
-            if new_list_end == 0 {
-                new_list_end =
-                    line.len() - line.chars().rev().collect::<String>().find("TSIL").unwrap();
-            }
-            continue;
-        }
-
-        if line.contains("ORDER#")
-            || line.contains("2-10 INVENTORY PRICE UPDATE")
-            || line.contains("REIFSNYDER'S AG CENTER")
-            || line.contains("UPDT")
-            || line.trim() == "- END -"
-            || line.trim() == ""
-            || new_list_end == 0
-        {
-            continue;
-        }
-
-        let mut new_list_start = 0;
-        for i in (0..new_list_end).rev() {
-            if line.chars().nth(i).unwrap().is_whitespace() {
-                new_list_start = i + 1;
-                break;
-            }
-        }
-
-        let list_str = &line[new_list_start..new_list_end];
-        if list_str.trim() == "" {
-            continue;
-        }
-
-        let list_price = match list_str.parse::<f32>() {
-            Ok(p) => p,
-            Err(_) => {
-                println!("Could not parse list price from {}", list_str);
-                return Ok(());
-            }
-        };
-
-        let sku = &line.trim()[..line.trim().find(" ").unwrap()];
-
+    let input_json = json::parse(file)?;
+    for line in input_json {
+        let sku = line["sku"];
+        let list_price = line["price"]
+   
         if let Some(product) = shopify_get_product_by_sku(sku, list_price).await {
             println!("Found shopify listing for sku: {}", sku);
             products.push(product);
         }
     }
 
-    for product in products.iter() {
-        for variant in product.iter() {
-            if variant.abc_price != variant.shopify_price {
-                println!(
-                    "Updated price for {} from {} to {}",
-                    variant.display_name, variant.shopify_price, variant.abc_price
-                );
-                update_shopify_price(&variant.id, variant.abc_price).await;
-            }
-        }
-    }
+//     for product in products.iter() {
+//         for variant in product.iter() {
+//             if variant.abc_price != variant.shopify_price {
+//                 println!(
+//                     "Updated price for {} from {} to {}",
+//                     variant.display_name, variant.shopify_price, variant.abc_price
+//                 );
+//                 update_shopify_price(&variant.id, variant.abc_price).await;
+//             }
+//         }
+//     }
 
     Ok(())
 }
