@@ -264,28 +264,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut products: Vec<Vec<Product>> = Vec::new();
-    let input_json = json::parse(file)?;
-    for line in input_json {
-        let sku = line["sku"];
-        let list_price = line["price"]
-   
+    let input_json: Value = serde_json::from_str(&file)?;
+    let lines: Vec<Value> = match input_json.as_array() {
+        Some(v) => v.to_vec(),
+        None => return Ok(()),
+    };
+    for line in lines {
+        let sku = match line["sku"].as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        let list_price: f32 = match line["price"].as_f64() {
+            Some(f) => f as f32,
+            None => continue,
+        };
+
+        if list_price <= 0.0 {
+            continue;
+        }
+
         if let Some(product) = shopify_get_product_by_sku(sku, list_price).await {
             println!("Found shopify listing for sku: {}", sku);
             products.push(product);
         }
     }
 
-//     for product in products.iter() {
-//         for variant in product.iter() {
-//             if variant.abc_price != variant.shopify_price {
-//                 println!(
-//                     "Updated price for {} from {} to {}",
-//                     variant.display_name, variant.shopify_price, variant.abc_price
-//                 );
-//                 update_shopify_price(&variant.id, variant.abc_price).await;
-//             }
-//         }
-//     }
+    for product in products.iter() {
+        for variant in product.iter() {
+            if variant.abc_price != variant.shopify_price {
+                println!(
+                    "Updated price for {} from {} to {}",
+                    variant.display_name, variant.shopify_price, variant.abc_price
+                );
+                update_shopify_price(&variant.id, variant.abc_price).await;
+            }
+        }
+    }
 
     Ok(())
 }
