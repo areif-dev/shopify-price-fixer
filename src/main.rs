@@ -53,7 +53,7 @@ fn read_config() -> Result<Config, String> {
 ///
 /// Will return an Err(std::io::Error) if the input operation fails
 fn user_input_file_path() -> io::Result<String> {
-    print!("Enter the path to the ABC 2-10 Report File: ");
+    print!("Enter the path to the exported ABC report: ");
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
