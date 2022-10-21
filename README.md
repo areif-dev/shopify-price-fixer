@@ -21,7 +21,7 @@ This software is intended to be used as a bridge between the proprietary ABC Acc
 ```
 While this file can be written manually by using the menus in ABC, it is recommended to use the export-abc-bill macro from this repository. 
 
-- First, make sure that the macro is runny by double clicking the export-abc-bill.ahk file wherever it is saved on the system. If the macro is already running, there is no need to follow this step
+- First, make sure that the macro is running by double clicking the export-abc-bill.ahk file wherever it is saved on the system. If the macro is already running, there is no need to follow this step
 - To use the macro, first go to the F10-B or Bill entry screen on ABC.
 - Navigate to the bill you wish to export
 - Click on the Vendor entry field (Should be something like PURMII0 or SERCO 0)
