@@ -8,7 +8,7 @@ This software is intended to be used as a bridge between the proprietary ABC Acc
 
 - The macro shortcut for automatically creating a properly formatted JSON file from an ABC report depends on AutoHotKey. Therefore, before running the macro, install AutoHotKey from https://www.autohotkey.com/. 
 - Now install the macro by downloading or copying the contents of the export-abc-bill.ahk file in the root of the repository somewhere onto your system. To enable the script, simply double click the file to run it in the background. To Kill the script, you can right click the green "H" icon in the system tray and click "Exit". 
-- Finally, install the actaul price fixer script. To install the price fixer script, go to the release section of the Github page and download the shopify-price-fixer.exe file from the latest release. At the time of publishing this README, that version is 0.2.0.
+- Finally, install the actaul price fixer script. To install the price fixer script, go to the release section of the Github page and download the shopify-price-fixer.exe file from the latest release. At the time of publishing this README, that version is 0.2.1.
 
 ## Usage
 
