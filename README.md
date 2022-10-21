@@ -4,41 +4,51 @@
 
 This software is intended to be used as a bridge between the proprietary ABC Accounting software and a Shopify website. 
 
+## Installation
+
+- The macro shortcut for automatically creating a properly formatted JSON file from an ABC report depends on AutoHotKey. Therefore, before running the macro, install AutoHotKey from https://www.autohotkey.com/. 
+- Now install the macro by downloading or copying the contents of the export-abc-bill.ahk file in the root of the repository somewhere onto your system. To enable the script, simply double click the file to run it in the background. To Kill the script, you can right click the green "H" icon in the system tray and click "Exit". 
+- Finally, install the actaul price fixer script. To install the price fixer script, go to the release section of the Github page and download the shopify-price-fixer.exe file from the latest release. At the time of publishing this README, that version is 0.2.0.
+
 ## Usage
 
-- On ABC, run a report from the 2-10 "Inventory Price Update" screen. This report takes a range of bill numbers as input and returns all items on those bills with their previous and up to date list prices. 
-- Enter a range of bills that is moderate in size. For example, it is best to keep the total number of bills to no more than 50
-- Xport the report to a file, and save it somewhere in the file system. You may save it anywhere and call it anything as long as you remember the path to where it was saved and what it is named
-- Run the price-fixer binary. If you run the binary from the command line, you may supply the path to the report as a command line argument. If you do not supply a command line argument, the program will prompt you for the path to the report at runtime
+- The price fixer uses JSON files to get the current price for an item by its sku. The file should be formatted as below
+```json
+[
+  {"sku": "123456", "price": 12.00},
+  {"sku": "789100", "price": 100.00}
+]
+```
+While this file can be written manually by using the menus in ABC, it is recommended to use the export-abc-bill macro from this repository. 
+
+- First, make sure that the macro is runny by double clicking the export-abc-bill.ahk file wherever it is saved on the system. If the macro is already running, there is no need to follow this step
+- To use the macro, first go to the F10-B or Bill entry screen on ABC.
+- Navigate to the bill you wish to export
+- Click on the Vendor entry field (Should be something like PURMII0 or SERCO 0)
+- On the keyboard, hold down Win+Shift+E. This will begin the macro. Note that the macro will not stop until it reaches the end of the bill file, and you should not navigate away from ABC while it is running. 
+- If you must interrupt the macro, you can kill it by right clicking on the AutoHotKey tray icon and clicking "Exit" or "Pause Script". The icon is a white "H" with a green background.
+- The macro will generate a file on the Desktop called "exported_bill_YYYY-MM-DDTHH-MM.json" where "YYYY-MM-DDTHH-MM" will be replaced with the datestamp of when the file was created.
+
+Now you can run the shopify-price-fixer.exe script
+
+- Copy the path of the "exported_bill...json" file
+- Run the shopify-price-fixer.exe file 
+- Paste the path of the JSON file into the program when it prompts for it
+- The program will query each sku to find the product information from the Shopify site, then attempt to update its price if a product and its variants can be found
 
 ## Examples
 
-Suppose you have a report such as the following saved at C:\Users\user\Desktop\report.txt
-```bash
-# C:\Users\user\Desktop\report.txt
-2-10 INVENTORY PRICE UPDATE            Saturday, September 3, 2022   67514     1
-REIFSNYDER'S AG CENTER                                  Run:  9/ 3/2022  1:05 PM
-                                                              UPDT  ORDER    BILL      OLD  NEW COST   %      OLD      NEW  %
-ITEM # & DESCRIPTION                   UNIT MULT #CASES   QTY CODE  PRICE    PRICE     COST +FREIGHT   CHG    LIST     LIST MARKUP
-
-# 67514 PURMII0 PURINA MILLS INC                 Order#
-PURSTRATEGYH STRATEGY HEALTHY EDGE       EA                 40 D           20.9423  21.3423  20.9423   -2    24.25    24.25    16
-PURSTRATEGY PURINA STRATEGY  (reg. Strat EA                 40 D           19.6619  20.1119  19.6619   -2    22.85    22.85    16
-PURULTIUM ULTIUM HORSE FEED 11.7%-12.4%  EA                 40 D           25.8408  26.2908  25.8408   -2    28.85    28.85    12
-PORCINE ACTIVE 25# PORCINE ACTIVE MAZURI                     3 D           14.6082  14.8382  14.6082   -2    18.49    18.49    27
-PURAMPLIFY50 AMPLIFY SUPPLMNT 50# NUGGET EA                  5 D           44.5133  44.9633  44.5133   -1    52.99    52.99    19
-- END -
-```
+Suppose you have a report such as the following saved at C:\Users\user\Desktop\exported_bill_2022-10-21T12-23.json
 
 ### With command line args
 
 ```bash
-.\price-fixer.exe C:\Users\user\Desktop\report.txt
+.\price-fixer.exe C:\Users\user\Desktop\exported_bill_2022-10-21T12-23.json
 ```
 
 ### Without command line args
 
 ```bash
 .\price-fixer.exe
-Enter the path to the ABC 2-10 Report File: C:\Users\user\Desktop\report.txt
+Enter the path to the ABC 2-10 Report File: C:\Users\user\Desktop\exported_bill_2022-10-21T12-23.json
 ```
