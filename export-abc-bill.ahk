@@ -48,4 +48,5 @@ for key, val in ProductSkus
 
 OutputText := SubStr(OutputText, 1, StrLen(OutputText) - 2) . "`n]"
 FileAppend, %OutputText%, %A_Desktop%\exported_bill_%A_YYYY%-%A_MM%-%A_DD%T%A_Hour%-%A_Min%.json
+Run, "C:\projects\shopify-price-fixer\shopify-price-fixer.exe" %A_Desktop%\exported_bill_%A_YYYY%-%A_MM%-%A_DD%T%A_Hour%-%A_Min%.json
 return
