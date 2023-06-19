@@ -50,47 +50,6 @@ if EndingBill is not integer
 GoSub, Run214
 Return
 
-GetPrices(SkusFileLocation) {
-    FileRead, SkuStrs, %SkusFileLocation%
-
-    if WinExist("REIFSNYDER'S AG CENTER - ABC Accounting Client")
-        WinActivate
-    else 
-        Run, "C:\ABC Software\Client4\abctwin.exe"
-
-    ; Go to inventory screen
-    Send, {F10}
-    Sleep, 1000
-    Send, i
-    Sleep, 1000
-
-    PricesBySku := []
-    Loop, parse, SkuStrs, `n 
-    {
-        TrimmedSku := Trim(A_LoopField)
-        SplitSku := StrSplit(TrimmedSku, " ",, 2)
-
-        ControlClick, ThunderRT6TextBox2
-        if SplitSku.Length() == 2 {
-            Send, {F6}
-            Sleep, 1000
-            Send, %TrimmedSku%
-            Sleep, 500
-            Send, {Enter}
-            Sleep, 1000
-        } else {
-            TempSku := SplitSku[1]
-            ControlSetText, ThunderRT6TextBox2, %TempSku%
-            Send, {Enter}
-            Sleep, 500
-        }
-        ControlGetText, ListPrice, ThunderRT6TextBox27
-        ControlGetText, ActualSku, ThunderRT6TextBox2
-        PricesBySku[ActualSku] := ListPrice
-        MsgBox % ActualSku " " PricesBySku[ActualSku]
-    }
-}
-
 Run214:
 if WinExist("REIFSNYDER'S AG CENTER - ABC Accounting Client")
     WinActivate
@@ -144,11 +103,11 @@ Send, {Enter}
 SetTitleMatchMode, 2
 loop, 300 {
     if (FileExist(BillFileLocation)) and (WinExist("2_14_" . FileID)) {
-        Run, %A_ScriptDir%\.virtual\Scripts\python.exe %A_ScriptDir%\sku_extractor.py -o %SkusFileLocation% %BillFileLocation%
+        RunWait, %A_ScriptDir%\.virtual\Scripts\python.exe %A_ScriptDir%\sku_extractor.py -o %SkusFileLocation% %BillFileLocation%
 
         loop, 300 {
             if (FileExist(SkusFileLocation)) {
-                GetPrices(SkusFileLocation)
+                RunWait, C:\Program Files\AutoHotKey\AutoHotKey.exe %A_ScriptDir%\get-prices-by-sku.ahk %SkusFileLocation%
                 break
             } else 
                 Sleep, 1000
