@@ -3,6 +3,13 @@
 SendMode Input  ; Recommended for new scripts due to its superior speed and reliability.
 SetWorkingDir %A_ScriptDir%  ; Ensures a consistent starting directory.
 
+EnvGet, HomeDrive, homedrive 
+EnvGet, HomePath, homepath
+TabbedFile = %HomeDrive%%HomePath%\Documents\My ABC Files\TabOutput.tsv
+if FileExist(TabbedFile) {
+    FileDelete % TabbedFile
+}
+
 ; Make a system call to generate a GUID. The returned GUID will be enclosed in
 ; curly braces "{}"
 ; If the system call fails, then return a null string
@@ -43,6 +50,7 @@ if (EndingBill = "")
     EndingBill := StartingBill
 }
 if EndingBill is not integer 
+
 {
     MsgBox, You must enter an integer for Ending Invoice!
     GoSub, ShowForm
@@ -79,7 +87,7 @@ Send, %EndingBill%
 Sleep, 500
 Send, {Enter}
 Sleep, 500
-Send, x
+Send, t
 Sleep, 1000
 
 FileGUID := CreateGUID()
@@ -93,17 +101,11 @@ if (StrLen(FileGUID) > 0) {
     ; is run in very quick succession or the system time is reset
     FormatTime, FileID,, yyyy-MM-ddTHH_mm
 }
-BillFileLocation = %A_ScriptDir%\2_14_%FileID%.txt
 SkusFileLocation = %A_ScriptDir%\skus_%FileID%.txt
-Send, %BillFileLocation%
-Sleep, 500
-Send, {Enter}
 
-; Match titles that contain the given string anywhere
-SetTitleMatchMode, 2
 loop, 300 {
-    if (FileExist(BillFileLocation)) and (WinExist("2_14_" . FileID)) {
-        RunWait, %A_ScriptDir%\.virtual\Scripts\python.exe %A_ScriptDir%\sku_extractor.py -o %SkusFileLocation% %BillFileLocation%
+    if (FileExist(TabbedFile)) {
+        RunWait, "%A_ScriptDir%\.virtual\Scripts\python.exe" "%A_ScriptDir%\sku_extractor.py" -o "%SkusFileLocation%" "%TabbedFile%"
 
         loop, 300 {
             if (FileExist(SkusFileLocation)) {

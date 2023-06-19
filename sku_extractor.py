@@ -1,4 +1,5 @@
 import sys
+import csv
 from argparse import ArgumentParser
 
 SKU_START_INDEX = 19
@@ -20,29 +21,13 @@ def setup_args():
     return args
 
 
-def extract_skus_from_file(file_text: str) -> list[str]:
-    lines = file_text.split("\n")
+def extract_skus_from_file(csv_reader: csv.DictReader) -> list[str]:
     skus = []
-    for line in lines:
+    for line in csv_reader:
+        sku = line["Item"]
 
-        # Lines that match these patterns are all header information, so they
-        # can be skipped
-        if (
-            line.startswith("2-14")
-            or line.startswith("REIFSNYDER'S")
-            or line.startswith("Bill#")
-            or line.strip() == ""
-        ):
-            continue
-
-        sku_end_index = line.find("  ", SKU_START_INDEX)
-
-        # There is no discernable end to the sku, so the line is most likely an
-        # blank or missing information
-        if sku_end_index < 0:
-            continue
-
-        skus.append(line[SKU_START_INDEX:sku_end_index])
+        if not sku.endswith(".") and not line["Cost"].strip() == "":
+            skus.append(sku)
 
     return skus
 
@@ -51,9 +36,8 @@ def main():
     args = setup_args()
 
     with open(args.file_in) as file_214:
-        file_text = file_214.read()
-
-    skus = extract_skus_from_file(file_text)
+        csv_reader = csv.DictReader(file_214, delimiter="\t")
+        skus = extract_skus_from_file(csv_reader)
 
     if args.out is not None and args.out != "":
         with open(args.out, "w") as f:
