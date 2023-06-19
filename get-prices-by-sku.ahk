@@ -11,59 +11,50 @@ GetPrices(SkusFileLocation) {
     else 
         Run, "C:\ABC Software\Client4\abctwin.exe"
 
-    ; Go to accounts receivable screen
+    ; Go to inventory screen
     Send, {F10}
     Sleep, 1000
-    Send, r
+    Send, i
     Sleep, 1000
 
-    ; Clear the screen to a new ar file
-    Send, {Ctrl Down}
-    Send, n 
-    Send, {Ctrl Up}
-    Sleep, 1000
-
-    if WinExist("Save changes before proceeding?") {
-        Send, {Right}
-        Sleep, 100
-        Send, {Enter}
-        Sleep, 1000
-
-        if WinExist("REIFSNYDER'S AG CENTER - ABC Accounting Client")
-            WinActivate
-    }
-
-    Send, {PgDn}
-    Sleep, 500
-
-    PricesBySku := []
+    OutputText := "[`n"
     Loop, parse, SkuStrs, `n 
     {
-        TrimmedSku := Trim(A_LoopField, OmitChars := "`n`t`r")
+        ; Clear the screen to a new inventory file
+        Send, {Ctrl Down}
+        Send, n 
+        Send, {Ctrl Up}
+        Sleep, 500
 
-        Send, %TrimmedSku%
+        if WinExist("Save changes before proceeding?") {
+            Send, {Right}
+            Sleep, 100
+            Send, {Enter}
+            Sleep, 1000
+
+            if WinExist("REIFSNYDER'S AG CENTER - ABC Accounting Client")
+                WinActivate
+        }
+
+        TrimmedSku := Trim(A_LoopField, OmitChars := "`n`t`r")
+        if (TrimmedSku = "") {
+            continue
+        }
+
+        ControlClick, ThunderRT6TextBox2
+        ControlSetText, ThunderRT6TextBox2, %TrimmedSku%
         Send, {Enter}
         Sleep, 500
-        WinGetText, WinText
-        SplitWinText := StrSplit(WinText, " ")
 
-        if (SplitWinText[1] = "Lookup") {
-            Send, %TrimmedSku%
-            Sleep, 1000
-            Send, {Enter}
-            Sleep, 500
-        }
-        
-        Sleep, 500
-        Send, {Up}
-        Sleep, 500
-
-        ControlGetText, ListPrice, ThunderRT6TextBox45 
-        ControlGetText, ActualSku, ThunderRT6TextBox41
-        PricesBySku[ActualSku] := ListPrice
-        MsgBox % ActualSku " " PricesBySku[ActualSku]
-        Sleep, 1000
+        ControlGetText, ListPrice, ThunderRT6TextBox27 
+        OutputText := OutputText . "    {""sku"": """ . TrimmedSku . """, ""price"": " . ListPrice . "},`n"
     }
+    OutputText := SubStr(OutputText, 1, StrLen(OutputText) - 2) . "`n]"
+    f := FileOpen(A_ScriptDir . "\exported_bill.json", "w")
+    f.Write(OutputText)
+    f.Close()
+    RunWait, "%A_ScriptDir%\shopify-price-fixer.exe" "%A_ScriptDir%\exported_bill.json"
+    FileDelete % A_Args[1]
 }
 
 GetPrices(A_Args[1])
