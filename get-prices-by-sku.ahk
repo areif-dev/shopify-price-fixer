@@ -3,7 +3,15 @@
 SendMode Input  ; Recommended for new scripts due to its superior speed and reliability.
 SetWorkingDir %A_ScriptDir%  ; Ensures a consistent starting directory.
 
+#Include lib.ahk
+
 GetPrices(SkusFileLocation) {
+    ShortWait = 100
+    ScreenDir = %A_ScriptDir%\screens\
+    InventoryScreens := []
+    InventoryScreens[1] := ScreenDir . "save_as_popup.png" 
+    InventoryScreens[2] := ScreenDir . "empty_inventory_screen.png"
+
     FileRead, SkuStrs, %SkusFileLocation%
 
     if WinExist("REIFSNYDER'S AG CENTER - ABC Accounting Client")
@@ -13,9 +21,9 @@ GetPrices(SkusFileLocation) {
 
     ; Go to inventory screen
     Send, {F10}
-    Sleep, 1000
+    AwaitElementLoad(ScreenDir . "selection_screen.png")
     Send, i
-    Sleep, 1000
+    AwaitElementLoad(ScreenDir . "inventory_screen.png")
 
     OutputText := "[`n"
     Loop, parse, SkuStrs, `n 
@@ -24,13 +32,16 @@ GetPrices(SkusFileLocation) {
         Send, {Ctrl Down}
         Send, n 
         Send, {Ctrl Up}
-        Sleep, 500
+        foundScreenIndex := AwaitAnyElementsLoad(InventoryScreens)
 
-        if WinExist("Save changes before proceeding?") {
+        if (foundScreenIndex = -1) {
+            MsgBox, Inventory screen did not clear after Ctrl+N
+            return 
+        } else if (foundScreen = 1) {
             Send, {Right}
-            Sleep, 100
+            Sleep % SortWait * 2 
             Send, {Enter}
-            Sleep, 1000
+            Sleep % ShortWait * 2
 
             if WinExist("REIFSNYDER'S AG CENTER - ABC Accounting Client")
                 WinActivate
@@ -44,8 +55,8 @@ GetPrices(SkusFileLocation) {
         ControlClick, ThunderRT6TextBox2
         ControlSetText, ThunderRT6TextBox2, %TrimmedSku%
         Send, {Enter}
-        Sleep, 500
 
+        AwaitElementLoad(ScreenDir . "complete_inventory_screen.png")
         ControlGetText, ListPrice, ThunderRT6TextBox27 
         OutputText := OutputText . "    {""sku"": """ . TrimmedSku . """, ""price"": " . ListPrice . "},`n"
     }

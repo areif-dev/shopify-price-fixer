@@ -3,25 +3,15 @@
 SendMode Input  ; Recommended for new scripts due to its superior speed and reliability.
 SetWorkingDir %A_ScriptDir%  ; Ensures a consistent starting directory.
 
+#Include lib.ahk 
+
 EnvGet, HomeDrive, homedrive 
 EnvGet, HomePath, homepath
 TabbedFile = %HomeDrive%%HomePath%\Documents\My ABC Files\TabOutput.tsv
+ScreenDir = %A_ScriptDir%\screens\
+ShortWait = 100
 if FileExist(TabbedFile) {
     FileDelete % TabbedFile
-}
-
-; Make a system call to generate a GUID. The returned GUID will be enclosed in
-; curly braces "{}"
-; If the system call fails, then return a null string
-CreateGUID()
-{
-    VarSetCapacity(pguid, 16, 0)
-    if !(DllCall("ole32.dll\CoCreateGuid", "ptr", &pguid)) {
-        size := VarSetCapacity(sguid, (38 << !!A_IsUnicode) + 1, 0)
-        if (DllCall("ole32.dll\StringFromGUID2", "ptr", &pguid, "ptr", &sguid, "int", size))
-            return StrGet(&sguid)
-    }
-    return ""
 }
 
 ; Subroutine to generate a form to enter starting and ending bill ids
@@ -66,29 +56,28 @@ else
 
 ; Get to the main menu of ABC and run the 2-14 report
 Send, {F10}
-Sleep, 1000
+AwaitElementLoad(ScreenDir . "selection_screen.png")
 Send, 2
-Sleep, 1000
+AwaitElementLoad(ScreenDir . "purchase_reports_screen.png")
 Send, 14
-Sleep, 500
 Send, {Enter}
 
 ; On the report screen, send the starting and ending bill numbers 
-Sleep, 1000
+AwaitElementLoad(ScreenDir . "2_14_screen.png")
 Send, {Enter}
-Sleep, 500
+Sleep % ShortWait * 2
 Send, %StartingBill%
-Sleep, 500
+Sleep % ShortWait * 2
 Send, {Enter}
-Sleep, 500
+Sleep % ShortWait * 2
 Send, %EndingBill%
 
 ; Tell ABC to export the report to a text file
-Sleep, 500
+Sleep % ShortWait * 2
 Send, {Enter}
-Sleep, 500
+Sleep % ShortWait * 2
 Send, t
-Sleep, 1000
+Sleep % ShortWait * 10
 
 FileGUID := CreateGUID()
 if (StrLen(FileGUID) > 0) {
@@ -112,12 +101,12 @@ loop, 300 {
                 RunWait, C:\Program Files\AutoHotKey\AutoHotKey.exe %A_ScriptDir%\get-prices-by-sku.ahk %SkusFileLocation%
                 break
             } else 
-                Sleep, 1000
+                Sleep % ShortWait * 10
         }
         break
     }
     else
-        Sleep, 1000
+        Sleep % ShortWait * 10
 }
 ExitApp
 
