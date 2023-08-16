@@ -25,12 +25,26 @@ GetPrices(SkusFileLocation) {
     Send, i
     AwaitElementLoad(ScreenDir . "inventory_screen.png")
 
-    OutputText := "[`n"
+    f := FileOpen(A_ScriptDir . "\exported_bill.json", "w")
+    f.Write("")
+    f.Close()
+
+    f := FileOpen(A_ScriptDir . "\exported_bill.json", "a")
+
+    OutputText := "["
     Loop, parse, SkuStrs, `n 
     {
+        if (A_Index = 1) {
+            OutputText := OutputText . "`n"
+        } else {
+            OutputText := OutputText . ",`n"
+        }
+
         ; Clear the screen to a new inventory file
         Send, {Ctrl Down}
+        Sleep % ShortWait * 2
         Send, n 
+        Sleep % ShortWait * 2
         Send, {Ctrl Up}
         foundScreenIndex := AwaitAnyElementsLoad(InventoryScreens)
 
@@ -58,11 +72,12 @@ GetPrices(SkusFileLocation) {
 
         AwaitElementLoad(ScreenDir . "complete_inventory_screen.png")
         ControlGetText, ListPrice, ThunderRT6TextBox27 
-        OutputText := OutputText . "    {""sku"": """ . TrimmedSku . """, ""price"": " . ListPrice . "},`n"
+        OutputText := OutputText . "    {""sku"": """ . TrimmedSku . """, ""price"": " . ListPrice . "}"
+        f.Write(OutputText)
+        OutputText := ""
     }
-    OutputText := SubStr(OutputText, 1, StrLen(OutputText) - 2) . "`n]"
-    f := FileOpen(A_ScriptDir . "\exported_bill.json", "w")
-    f.Write(OutputText)
+
+    f.Write("`n]")
     f.Close()
     RunWait, "%A_ScriptDir%\shopify-price-fixer.exe" "%A_ScriptDir%\exported_bill.json"
     FileDelete % A_Args[1]
