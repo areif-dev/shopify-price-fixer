@@ -18,6 +18,20 @@ This software is intended to be used as a bridge between the proprietary ABC Acc
 
 ## Usage
 
+### Required Configuration
+
+The price fixer requires access to the API of your Shopify store. Provide this information in a file called `config.json` in the same folder where you stored the `shopify-price-fixer.exe` and all other script files. The format of the file is as follows: 
+
+```json
+{
+  "shopify_access_token": "your-super-secret-api-token",
+  "business_domain": "your-domain.myshopify.com",
+  "api_version": "2022-07"
+}
+```
+
+For information about setting up the Shopify Admin API, see https://shopify.dev/docs/api/admin/getting-started
+
 ### Manually Export Prices
 
 - The price fixer uses JSON files to get the current price for an item by its sku. The file should be formatted as below
