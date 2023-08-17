@@ -23,8 +23,8 @@ This software is intended to be used as a bridge between the proprietary ABC Acc
 
 ```json
 [
-  { "sku": "123456", "price": 12.0 },
-  { "sku": "789100", "price": 100.0 }
+  { "sku": "123456", "price": 12.00 },
+  { "sku": "789100", "price": 100.00 }
 ]
 ```
 
