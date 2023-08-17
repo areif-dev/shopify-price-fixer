@@ -11,7 +11,8 @@ This software is intended to be used as a bridge between the proprietary ABC Acc
 - AutoHotKey v1.1 for controlling the screen: [https://www.autohotkey.com/](https://www.autohotkey.com/)
 - Python 3.7+ for parsing ABC 2-14 report: [https://www.python.org/downloads/](https://www.python.org/downloads/)
 
-- The script for automatically creating a properly formatted JSON file from an ABC report depends on AutoHotKey. Therefore, before running the script, install AutoHotKey v1.1 from https://www.autohotkey.com/.
+### Installing Exporter Scripts
+
 - Download the price-fixer.zip file from [https://github.com/areif-dev/shopify-price-fixer/releases/latest](https://github.com/areif-dev/shopify-price-fixer/releases/latest)
 - Unzip this file in a folder you will remember as you will need access to the export-abc-bill.ahk file regularly to start the script
 
