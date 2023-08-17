@@ -6,11 +6,13 @@ This software is intended to be used as a bridge between the proprietary ABC Acc
 
 ## Installation
 
-- The macro shortcut for automatically creating a properly formatted JSON file from an ABC report depends on AutoHotKey. Therefore, before running the macro, install AutoHotKey from https://www.autohotkey.com/. 
-- Now install the macro by downloading or copying the contents of the export-abc-bill.ahk file in the root of the repository somewhere onto your system. To enable the script, simply double click the file to run it in the background. To Kill the script, you can right click the green "H" icon in the system tray and click "Exit". 
-- Finally, install the actual price fixer script. To install the price fixer script, go to the release section of the Github page and download the shopify-price-fixer.exe file from the latest release. At the time of publishing this README, that version is 0.2.1.
+- The script for automatically creating a properly formatted JSON file from an ABC report depends on AutoHotKey. Therefore, before running the script, install AutoHotKey v1.1 from https://www.autohotkey.com/. 
+- Download the price-fixer.zip file from [https://github.com/areif-dev/shopify-price-fixer/releases/latest](https://github.com/areif-dev/shopify-price-fixer/releases/latest)
+- Unzip this file in a folder you will remember as you will need access to the export-abc-bill.ahk file regularly to start the script
 
 ## Usage
+
+### Manually Export Prices
 
 - The price fixer uses JSON files to get the current price for an item by its sku. The file should be formatted as below
 ```json
@@ -19,15 +21,18 @@ This software is intended to be used as a bridge between the proprietary ABC Acc
   {"sku": "789100", "price": 100.00}
 ]
 ```
-While this file can be written manually by using the menus in ABC, it is recommended to use the export-abc-bill macro from this repository. 
+- Save this file somewhere you will remember, such as C:\Users\<username>\Desktop\exported_prices.json
+- Run the `shopify-price-fixer.exe` program you installed from GitHub
+- The program will prompt you for the path to a file containing exported bill info. Please provide the absolute path to this file. It should look like the following:
+![example_shopify-price-fixer]()
 
-- First, make sure that the macro is running by double clicking the export-abc-bill.ahk file wherever it is saved on the system. If the macro is already running, there is no need to follow this step
-- To use the macro, first go to the F10-B or Bill entry screen on ABC.
-- Navigate to the bill you wish to export
-- Click on the Vendor entry field (Should be something like PURMII0 or SERCO 0)
-- On the keyboard, hold down Win+Shift+E. This will begin the macro. Note that the macro will not stop until it reaches the end of the bill file, and you should not navigate away from ABC while it is running. 
-- If you must interrupt the macro, you can kill it by right clicking on the AutoHotKey tray icon and clicking "Exit" or "Pause Script". The icon is a white "H" with a green background.
-- The macro will generate a file on the Desktop called "exported_bill_YYYY-MM-DDTHH-MM.json" where "YYYY-MM-DDTHH-MM" will be replaced with the datestamp of when the file was created.
+### Automatically Export Bills with AutoHotKey
+
+- Run the export-abc-bill.ahk script by double clicking the export-abc-bill.ahk file wherever it is saved on the system
+- A small menu will open that will ask for the starting and ending bill IDs. This represents the first and last bills that you want to export
+  - You may omit the "Ending Bill ID" and the script will only export the Starting Bill
+![example_export-abc-bill]()
+- That is all the manual input that is required. The AHK scripts will handle generating all necessary reports, extracting necessary information from them, and submitting updated price info to Shopify. **_Do not touch the mouse or keyboard during this time!_** Doing so will interrupt the script.
 
 Now you can run the shopify-price-fixer.exe script
 
