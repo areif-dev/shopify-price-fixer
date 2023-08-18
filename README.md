@@ -47,7 +47,9 @@ For information about setting up the Shopify Admin API, see https://shopify.dev/
 - Run the `shopify-price-fixer.exe` program you installed from GitHub
 - The program will prompt you for the path to a file containing exported bill info. Please provide the absolute path to this file. It should look like the following:
 
-![example_shopify-price-fixer](/screenshots/shopify-price-fixer.png)
+| Sample Run of Shopify Price Fixer |
+| :-------------------------------: |
+| ![example_shopify-price-fixer](/screenshots/shopify-price-fixer.png) |
 
 ### Automatically Export Bills with AutoHotKey
 
@@ -55,6 +57,8 @@ For information about setting up the Shopify Admin API, see https://shopify.dev/
 - A small menu will open that will ask for the starting and ending bill IDs. This represents the first and last bills that you want to export
   - You may omit the "Ending Bill ID" and the script will only export the Starting Bill
 
-![example_export-abc-bill](/screenshots/export-bill.png)
+| Export ABC Bill Script Form |
+| :-------------------------: |
+| ![example_export-abc-bill](/screenshots/export-bill.png) |
 
 - That is all the manual input that is required. The AHK scripts will handle generating all necessary reports, extracting necessary information from them, and submitting updated price info to Shopify. **_Do not touch the mouse or keyboard during this time!_** Doing so will interrupt the script.
