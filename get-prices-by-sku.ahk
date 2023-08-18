@@ -73,11 +73,14 @@ GetPrices(SkusFileLocation) {
         AwaitElementLoad(ScreenDir . "complete_inventory_screen.png")
         ControlGetText, ListPrice, ThunderRT6TextBox27 
 
-        ; If ListPrice is less than $1, ABC formats it as .## with no leading 0s. JSON will not parse 
-        ; without that leading 0, so add it back in
         ListPriceLength := StrLen(ListPrice)
-        if (ListPriceLength = 3) {
-          ListPrice := "0" . ListPrice
+        if (ListPriceLength = 0) {
+            ; The list price is $0.00, so there is no point listing it
+            continue 
+        } else if (ListPriceLength = 3) {
+            ; If ListPrice is less than $1, ABC formats it as .## with no leading 0s. JSON will not parse 
+            ; without that leading 0, so add it back in
+            ListPrice := "0" . ListPrice
         }
 
         OutputText := OutputText . "    {""sku"": """ . TrimmedSku . """, ""price"": " . ListPrice . "}"
