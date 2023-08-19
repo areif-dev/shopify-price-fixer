@@ -2,7 +2,13 @@ AwaitElementLoad(ImageFile)
 {
     ImagesArray := []
     ImagesArray[1] := ImageFile
-    return AwaitAnyElementsLoad(ImagesArray)
+    FoundIndex := AwaitAnyElementsLoad(ImagesArray)
+
+    if (FoundIndex = -1 && ErrorLevel = 2) {
+        MsgBox, There was a problem searching for %ImageFile%
+    } else if (FoundIndex = -1 && ErrorLevel = 1) {
+        MsgBox, Could not find %ImageFile% in 60 seconds 
+    }
 }
 
 AwaitAnyElementsLoad(ImageFiles) 
