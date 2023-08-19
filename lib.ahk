@@ -1,19 +1,8 @@
 AwaitElementLoad(ImageFile)
 {
-    loop, 240
-    {
-        ImageSearch, FoundX, FoundY, 0, 0, A_ScreenWidth, A_ScreenHeight, %ImageFile%
-        if (ErrorLevel = 2) {
-            MsgBox, Failed to run ImageSearch for %ImageFile%
-            return
-        }
-        else if (ErrorLevel = 1) 
-            Sleep, 250
-        else 
-            return 
-    }
-
-    MsgBox, Could not find screen %ImageFile% in 60 seconds 
+    ImagesArray := []
+    ImagesArray[1] := ImageFile
+    return AwaitAnyElementsLoad(ImagesArray)
 }
 
 AwaitAnyElementsLoad(ImageFiles) 
@@ -24,8 +13,7 @@ AwaitAnyElementsLoad(ImageFiles)
         {
             ImageSearch, FoundX, FoundY, 0, 0, A_ScreenWidth, A_ScreenHeight, %file%
             if (ErrorLevel = 2) {
-                MsgBox, Failed to run ImageSearch for %file%
-                return
+                return -1
             }
             else if (ErrorLevel = 0) 
                 return i
