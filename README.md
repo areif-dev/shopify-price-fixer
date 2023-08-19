@@ -20,7 +20,7 @@ This software is intended to be used as a bridge between the proprietary ABC Acc
 
 ### Required Configuration
 
-The price fixer requires access to the API of your Shopify store. Provide this information in a file called `config.json` in the same folder where you stored the `shopify-price-fixer.exe` and all other script files. The format of the file is as follows: 
+The price fixer requires access to the API of your Shopify store. Provide this information in a file called `config.json` in the same folder where you stored the `shopify-price-fixer.exe` and all other script files. The format of the file is as follows:
 
 ```json
 {
@@ -38,8 +38,8 @@ For information about setting up the Shopify Admin API, see https://shopify.dev/
 
 ```json
 [
-  { "sku": "123456", "price": 12.00 },
-  { "sku": "789100", "price": 100.00 }
+  { "sku": "123456", "price": 12.0 },
+  { "sku": "789100", "price": 100.0 }
 ]
 ```
 
