@@ -1,46 +1,12 @@
 use std::io::Write;
-use std::{env, fs, io};
+use std::{cmp, env, fs, io};
+
+use shopify_updater::{Config, Product};
 
 use serde_json::Value;
 
 use reqwest::header::HeaderMap;
 use reqwest::header::InvalidHeaderValue;
-
-/// Keeps track of product information as it relates to shopify and ABC
-#[derive(Debug)]
-struct Product {
-    id: String,
-    display_name: String,
-    abc_price: f32,
-    shopify_price: f32,
-}
-
-/// Stores configuration details to run the app. Inlcuding the api key and domain to send queries
-/// to
-#[derive(Debug, serde::Deserialize)]
-struct Config {
-    /// API key for the Shopify admin API
-    shopify_access_token: String,
-
-    /// The shopfiy subdomain for the business. Like my-business.myshopify.com
-    business_domain: String,
-
-    /// The version of the admin api to use. Such as "2022-07"
-    api_version: String,
-}
-
-fn read_config() -> Result<Config, String> {
-    let config_str = match fs::read_to_string("./config.json") {
-        Ok(c) => c,
-        Err(_) => return Err("Could not read config file".to_string()),
-    };
-    let config: Config = match serde_json::from_str(&config_str) {
-        Ok(c) => c,
-        Err(_) => return Err("Failed to parse config file. Must define business_domain, shopify_access_token, and api_version".to_string()),
-    };
-
-    Ok(config)
-}
 
 /// Prompts the user for a file path to an ABC 2-10 report
 ///
@@ -80,7 +46,7 @@ fn user_input_file_path() -> io::Result<String> {
 fn create_client_with_headers(
     content_type: String,
 ) -> Result<(reqwest::Client, HeaderMap), InvalidHeaderValue> {
-    let config = read_config().unwrap();
+    let config = Config::read_config().unwrap();
     let access_token = config.shopify_access_token;
 
     let client = reqwest::Client::new();
@@ -96,7 +62,8 @@ fn create_client_with_headers(
 /// # Arguments
 ///
 /// * `id` - The unique shopify id for the product to update
-/// * `new_price` - The value to set as the new price for the shopify item
+/// * `new_price` - The value to set as the new price for the shopify item in cents. So $1.99 would
+/// be 199
 ///
 /// # Returns
 ///
@@ -105,9 +72,7 @@ fn create_client_with_headers(
 /// # Errors
 ///
 /// Thread will panic if sending the request fails or if fetching the response fails
-async fn update_shopify_price(id: &str, new_price: f32) -> String {
-    let config = read_config().unwrap();
-
+async fn update_shopify_price(config: &Config, id: &str, new_price: u32) -> String {
     let (client, headers) = match create_client_with_headers("application/json".to_string()) {
         Ok(c) => c,
         Err(e) => {
@@ -122,13 +87,10 @@ async fn update_shopify_price(id: &str, new_price: f32) -> String {
                 \"price\": \"{}\"
             }}
         }}",
-        new_price
+        (new_price as f32 / 100.0)
     );
 
-    let url = format!(
-        "https://{}/admin/variants/{}.json",
-        config.business_domain, id
-    );
+    let url = format!("https://{}/admin/variants/{}.json", config.business_url, id);
 
     let res = client
         .put(url)
@@ -161,7 +123,7 @@ async fn update_shopify_price(id: &str, new_price: f32) -> String {
 /// Thread will panic if sending or receiving the HTTP request fails. Thread will also panic if
 /// building a Product object from the json response fails at any point
 async fn shopify_get_product_by_sku(sku: &str, abc_price: f32) -> Option<Vec<Product>> {
-    let config = read_config().unwrap();
+    let config = Config::read_config().unwrap();
 
     let (client, headers) = match create_client_with_headers("application/graphql".to_string()) {
         Ok(t) => t,
@@ -193,7 +155,7 @@ async fn shopify_get_product_by_sku(sku: &str, abc_price: f32) -> Option<Vec<Pro
     let res = client
         .post(format!(
             "https://{}/admin/api/{}/graphql.json",
-            config.business_domain, config.api_version
+            config.business_url, config.api_version
         ))
         .headers(headers)
         .body(body)
@@ -263,44 +225,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut products: Vec<Vec<Product>> = Vec::new();
-    let input_json: Value = serde_json::from_str(&file)?;
-    let lines: Vec<Value> = match input_json.as_array() {
-        Some(v) => v.to_vec(),
-        None => return Ok(()),
-    };
-    for line in lines {
-        let sku = match line["sku"].as_str() {
-            Some(s) => s,
-            None => continue,
-        };
-        let list_price: f32 = match line["price"].as_f64() {
-            Some(f) => f as f32,
+    let config = shopify_updater::Config::read_config()?;
+    let abc_products = shopify_updater::parse_report_1_15(&file);
+    let shopify_products = shopify_updater::all_shopify_products(&config).await?;
+
+    for (sku, (shopify_price, shopify_id)) in shopify_products {
+        let abc_price = match abc_products.get(&sku) {
+            Some(p) => p,
             None => continue,
         };
 
-        if list_price <= 0.0 {
-            continue;
-        }
-
-        if let Some(product) = shopify_get_product_by_sku(sku, list_price).await {
-            println!("Found shopify listing for sku: {}", sku);
-            products.push(product);
-        }
-    }
-
-    for product in products.iter() {
-        for variant in product.iter() {
-            if variant.abc_price != variant.shopify_price {
-                println!(
-                    "Updated price for {} from {} to {}",
-                    variant.display_name, variant.shopify_price, variant.abc_price
-                );
-                update_shopify_price(&variant.id, variant.abc_price).await;
+        match shopify_price.cmp(abc_price) {
+            cmp::Ordering::Less => {
+                update_shopify_price(&config, &shopify_id, abc_price.to_owned()).await;
             }
+            cmp::Ordering::Greater => {
+                println!(
+                    "Item {} ABC: {} cents, Shopify: {} cents. Not adjusting",
+                    sku, abc_price, shopify_price
+                );
+            }
+            cmp::Ordering::Equal => (),
         }
     }
-    
+
     println!("--- Press Enter to exit ---");
     let mut _x = String::new();
     io::stdin().read_line(&mut _x)?;
