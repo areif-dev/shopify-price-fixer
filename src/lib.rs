@@ -178,3 +178,73 @@ pub async fn all_shopify_products(
 
     Ok(products)
 }
+
+/// List of supported types of logs
+#[non_exhaustive]
+pub enum Log {
+    /// Used for error messages. "./error.txt"
+    Error,
+
+    /// Shows which SKUs were adjusted in Shopify. "./adjusted.txt"
+    Adjusted,
+
+    /// Shows which SKUs were not adjusted because the price in ABC and Shopify are the same
+    /// already. "./not_adjusted_equal.txt"
+    Equal,
+
+    /// Shows which SKUs were not adjusted because the price in Shopify is already greater than
+    /// ABC. "./not_adjusted_greater.txt"
+    Greater,
+
+    /// Shows which SKUs exist in Shopify but were not found in ABC. "./not_found.txt"
+    NotFound,
+}
+
+/// Handles logging info to the proper file or stdout as specified.
+///
+/// # Arguments
+///
+/// * `to_stdout` - If `true`, don't write `msg` to any file, but instead write `msg` to stdout
+/// using `print!`. Otherwise, write `msg` to the appropriate log file specified by `log`
+///
+/// * `log` - Which `Log` `msg` should be written to. This will only be relevant if `to_stdout` is
+/// `false`
+///
+/// * `msg` - The message to be logged
+///
+/// # Returns
+///
+/// If successful, return unit type
+///
+/// # Errors
+///
+/// Will return `std::io::Error` if `to_stdout` is `false` and the required log file could not be
+/// opened or written to
+pub fn log<S>(to_stdout: bool, log: Log, msg: S) -> Result<(), std::io::Error>
+where
+    S: Into<String>,
+{
+    let mut msg_str: String = msg.into();
+    msg_str.push('\n');
+
+    if to_stdout {
+        print!("{}", msg_str);
+        return Ok(());
+    }
+
+    let log_path = match log {
+        Log::Adjusted => "./adjusted.txt",
+        Log::Equal => "./not_adjusted_equal.txt",
+        Log::Error => "./error.txt",
+        Log::Greater => "./not_adjusted_greater.txt",
+        Log::NotFound => "./not_found.txt",
+    };
+
+    let mut log_file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)?;
+    log_file.write(&msg_str.as_bytes())?;
+
+    Ok(())
+}
