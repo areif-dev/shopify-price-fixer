@@ -153,9 +153,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("--- Press Enter to exit ---");
-    let mut _x = String::new();
-    io::stdin().read_line(&mut _x)?;
-
     Ok(())
 }
