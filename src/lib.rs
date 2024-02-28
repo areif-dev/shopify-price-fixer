@@ -1,8 +1,29 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
 
 use reqwest::header::USER_AGENT;
+
+/// Interfaces with the Shopify REST API to keep prices up to date with the proprietary ABC
+/// accounting software. This program will only change a Shopify price if the price in ABC is
+/// greater than what is currently in Shopify.
+#[derive(clap::Parser)]
+#[command(version, about, long_about = None)]
+pub struct Cli {
+    /// Set this to bypass std::out and write logs to log files instead
+    #[arg(short, long)]
+    pub write_logs: bool,
+
+    /// Optional. Provide the path to report 1-15
+    #[arg(short, long)]
+    pub report: Option<PathBuf>,
+
+    /// Optional. Path to the config.json file. If left blank, assume ./config.json
+    #[arg(short, long)]
+    pub config: Option<PathBuf>,
+}
 
 /// Stores configuration details to run the app. Inlcuding the api key and domain to send queries
 /// to
