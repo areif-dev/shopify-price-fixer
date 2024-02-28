@@ -1,7 +1,9 @@
 use std::io::Write;
-use std::{cmp, env, fs, io};
+use std::path::PathBuf;
+use std::{cmp, fs, io};
 
-use shopify_updater::Config;
+use clap::Parser;
+use shopify_price_fixer as fixer;
 
 use reqwest::header::HeaderMap;
 use reqwest::header::InvalidHeaderValue;
@@ -16,13 +18,13 @@ use reqwest::header::InvalidHeaderValue;
 /// # Errors
 ///
 /// Will return an Err(std::io::Error) if the input operation fails
-fn user_input_file_path() -> io::Result<String> {
+fn user_input_file_path() -> io::Result<PathBuf> {
     print!("Enter the path to the exported ABC report: ");
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
 
-    Ok(input)
+    Ok(PathBuf::from(input.trim()))
 }
 
 /// Initialize a reqwest client and its HeaderMap for sending HTTP requests
@@ -44,7 +46,7 @@ fn user_input_file_path() -> io::Result<String> {
 fn create_client_with_headers(
     content_type: String,
 ) -> Result<(reqwest::Client, HeaderMap), InvalidHeaderValue> {
-    let config = Config::read_config().unwrap();
+    let config = fixer::Config::read_config().unwrap();
     let access_token = config.shopify_access_token;
 
     let client = reqwest::Client::new();
@@ -70,15 +72,12 @@ fn create_client_with_headers(
 /// # Errors
 ///
 /// Thread will panic if sending the request fails or if fetching the response fails
-async fn update_shopify_price(config: &Config, id: u64, new_price: u32) -> String {
-    let (client, headers) = match create_client_with_headers("application/json".to_string()) {
-        Ok(c) => c,
-        Err(e) => {
-            println!("Error in update_shopify_price {:?}", e);
-            return format!("Failed to create client for product id: {}", id);
-        }
-    };
-
+async fn update_shopify_price(
+    config: &fixer::Config,
+    id: u64,
+    new_price: u32,
+) -> Result<String, InvalidHeaderValue> {
+    let (client, headers) = create_client_with_headers("application/json".to_string())?;
     let body = format!(
         "{{
             \"variant\": {{
@@ -101,14 +100,16 @@ async fn update_shopify_price(config: &Config, id: u64, new_price: u32) -> Strin
         .await
         .unwrap();
 
-    res
+    Ok(res)
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut file_path = match env::args().nth(1) {
+    let cli = fixer::Cli::parse();
+
+    let mut file_path = match cli.report {
         Some(p) => p,
-        None => user_input_file_path()?.trim().to_string(),
+        None => user_input_file_path()?,
     };
 
     let file: String;
@@ -120,36 +121,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(_) => {
                 println!("You have entered a path that does not exist");
-                file_path = user_input_file_path()?.trim().to_string();
+                file_path = user_input_file_path()?;
             }
         }
     }
 
-    let config = shopify_updater::Config::read_config()?;
-    let abc_products = shopify_updater::parse_report_1_15(&file);
-    let shopify_products = shopify_updater::all_shopify_products(&config).await?;
+    let config = fixer::Config::read_config()?;
+    let log_to_stdout = !cli.write_logs;
+    let abc_products = shopify_price_fixer::parse_report_1_15(&file);
+    let shopify_products = shopify_price_fixer::all_shopify_products(&config).await?;
 
     for (sku, (shopify_price, shopify_id)) in shopify_products {
         let abc_price = match abc_products.get(&sku) {
             Some(p) => p,
-            None => continue,
+            None => {
+                fixer::log(
+                    log_to_stdout,
+                    fixer::Log::NotFound,
+                    format!("NOT FOUND Item {} Shopify: {} cents", sku, shopify_price),
+                )?;
+                continue;
+            }
         };
 
         match shopify_price.cmp(abc_price) {
             cmp::Ordering::Less => {
-                println!(
-                    "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-                    sku, abc_price, shopify_price
-                );
-                update_shopify_price(&config, shopify_id, abc_price.to_owned()).await;
+                fixer::log(
+                    log_to_stdout,
+                    fixer::Log::Adjusted,
+                    format!(
+                        "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+                        sku, abc_price, shopify_price
+                    ),
+                )?;
+                match update_shopify_price(&config, shopify_id, abc_price.to_owned()).await {
+                    Ok(_) => (),
+                    Err(e) => fixer::log(
+                        log_to_stdout,
+                        fixer::Log::Error,
+                        format!("ERROR updating product with id {}: {:?}", shopify_id, e),
+                    )?,
+                };
             }
             cmp::Ordering::Greater => {
-                println!(
-                    "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-                    sku, abc_price, shopify_price
-                );
+                fixer::log(
+                    log_to_stdout,
+                    fixer::Log::Greater,
+                    format!(
+                        "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+                        sku, abc_price, shopify_price
+                    ),
+                )?;
             }
-            cmp::Ordering::Equal => (),
+            cmp::Ordering::Equal => {
+                fixer::log(
+                    log_to_stdout,
+                    fixer::Log::Equal,
+                    format!(
+                        "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+                        sku, abc_price, shopify_price
+                    ),
+                )?;
+            }
         }
     }
 
