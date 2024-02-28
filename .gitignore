@@ -2,3 +2,4 @@ Cargo.lock
 exported*
 config.json
 target/
+TabOutput.tsv
