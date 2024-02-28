@@ -1,9 +1,7 @@
 use std::io::Write;
 use std::{cmp, env, fs, io};
 
-use shopify_updater::{Config, Product};
-
-use serde_json::Value;
+use shopify_updater::Config;
 
 use reqwest::header::HeaderMap;
 use reqwest::header::InvalidHeaderValue;
@@ -72,7 +70,7 @@ fn create_client_with_headers(
 /// # Errors
 ///
 /// Thread will panic if sending the request fails or if fetching the response fails
-async fn update_shopify_price(config: &Config, id: &str, new_price: u32) -> String {
+async fn update_shopify_price(config: &Config, id: u64, new_price: u32) -> String {
     let (client, headers) = match create_client_with_headers("application/json".to_string()) {
         Ok(c) => c,
         Err(e) => {
@@ -104,104 +102,6 @@ async fn update_shopify_price(config: &Config, id: &str, new_price: u32) -> Stri
         .unwrap();
 
     res
-}
-
-/// Try to find corresponding product(s) on shopify by their sku from ABC
-///
-/// # Arguments
-///
-/// * `sku` - The stock keeping unit that ABC uses for the product
-/// * `abc_price` - The price of the product in ABC
-///
-/// # Returns
-///
-/// Will return a vector of matching variants from shopify if any are found. If no matching
-/// variants are found, return None
-///
-/// # Errors
-///
-/// Thread will panic if sending or receiving the HTTP request fails. Thread will also panic if
-/// building a Product object from the json response fails at any point
-async fn shopify_get_product_by_sku(sku: &str, abc_price: f32) -> Option<Vec<Product>> {
-    let config = Config::read_config().unwrap();
-
-    let (client, headers) = match create_client_with_headers("application/graphql".to_string()) {
-        Ok(t) => t,
-        Err(e) => {
-            println!(
-                "Failed to create client in shopify_get_product_by_sku because of {:?}",
-                e
-            );
-            return None;
-        }
-    };
-
-    let body = format!(
-        "{{ 
-            productVariants(first: 10, query: \"sku:{}\") {{ 
-                edges {{ 
-                    node {{ 
-                        id 
-                        sku 
-                        displayName 
-                        price 
-                    }} 
-                }} 
-            }} 
-        }}",
-        sku
-    );
-
-    let res = client
-        .post(format!(
-            "https://{}/admin/api/{}/graphql.json",
-            config.business_url, config.api_version
-        ))
-        .headers(headers)
-        .body(body)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-
-    let product_values: Value = match serde_json::from_str(&res) {
-        Ok(v) => v,
-        Err(e) => {
-            println!("Could not create product for sku: {} {:?}", sku, e);
-            return None;
-        }
-    };
-
-    let edges: Vec<Value> = match product_values["data"]["productVariants"]["edges"].as_array() {
-        Some(v) => v.to_vec(),
-        None => return None,
-    };
-
-    if edges.len() == 0 {
-        return None;
-    }
-
-    let mut products: Vec<Product> = Vec::new();
-
-    for node in edges.iter() {
-        let display_name: String = node["node"]["displayName"].as_str().unwrap().to_string();
-        let id: String = node["node"]["id"].as_str().unwrap()[29..].to_string();
-        let shopify_price_str: String = node["node"]["price"].as_str().unwrap().to_string();
-        let shopify_price: f32 = shopify_price_str.parse().unwrap();
-
-        let product = Product {
-            abc_price,
-            display_name,
-            id,
-            shopify_price,
-        };
-
-        products.push(product);
-    }
-
-    Some(products)
 }
 
 #[tokio::main]
@@ -237,11 +137,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match shopify_price.cmp(abc_price) {
             cmp::Ordering::Less => {
-                update_shopify_price(&config, &shopify_id, abc_price.to_owned()).await;
+                println!(
+                    "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+                    sku, abc_price, shopify_price
+                );
+                update_shopify_price(&config, shopify_id, abc_price.to_owned()).await;
             }
             cmp::Ordering::Greater => {
                 println!(
-                    "Item {} ABC: {} cents, Shopify: {} cents. Not adjusting",
+                    "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
                     sku, abc_price, shopify_price
                 );
             }
