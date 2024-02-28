@@ -23,6 +23,11 @@ pub struct Cli {
     /// Optional. Path to the config.json file. If left blank, assume ./config.json
     #[arg(short, long)]
     pub config: Option<PathBuf>,
+
+    /// Set this to execute the program normally, except that no prices will actually be changed in
+    /// Shopify. Useful for debugging
+    #[arg(short, long = "dry")]
+    pub dry_run: bool,
 }
 
 /// Stores configuration details to run the app. Inlcuding the api key and domain to send queries

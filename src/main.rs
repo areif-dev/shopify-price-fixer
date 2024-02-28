@@ -154,6 +154,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         sku, abc_price, shopify_price
                     ),
                 )?;
+
+                // Dry run means that no prices should actually be changed, so skip the update step
+                if cli.dry_run {
+                    continue;
+                }
+
                 match update_shopify_price(&config, shopify_id, abc_price.to_owned()).await {
                     Ok(_) => (),
                     Err(e) => fixer::log(
