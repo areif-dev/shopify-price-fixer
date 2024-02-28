@@ -1,20 +1,24 @@
 # Shopify Price Fixer
 
-## Mission
-
-This software is intended to be used as a bridge between the proprietary ABC Accounting software and a Shopify website.
+This tool reads the output of ABC report 1-15 and compares the pricing from this report to the products on a given Shopify store. For any SKU from ABC whose price is higher than a matching Shopify product, update the shopify listing to have a corrected price.
 
 ## Installation
 
-### Dependencies
+### Windows 
 
-- AutoHotKey v1.1 for controlling the screen: [https://www.autohotkey.com/](https://www.autohotkey.com/)
-- Python 3.7+ for parsing ABC 2-14 report: [https://www.python.org/downloads/](https://www.python.org/downloads/)
+Download the latest `.exe` from [Releases](https://github.com/areif-dev/shopify-price-fixer/releases/latest)
 
-### Installing Exporter Scripts
+## Building 
 
-- Download the price-fixer.zip file from [https://github.com/areif-dev/shopify-price-fixer/releases/latest](https://github.com/areif-dev/shopify-price-fixer/releases/latest)
-- Unzip this file in a folder you will remember as you will need access to the export-abc-bill.ahk file regularly to start the script
+* Install Rust tooling from [https://rustup.rs/](https://rustup.rs/)
+
+```bash 
+git clone https://github.com/areif-dev/shopify-price-fixer
+```
+
+```bash 
+cargo build
+```
 
 ## Usage
 
@@ -25,40 +29,31 @@ The price fixer requires access to the API of your Shopify store. Provide this i
 ```json
 {
   "shopify_access_token": "your-super-secret-api-token",
-  "business_domain": "your-domain.myshopify.com",
+  "business_url": "your-domain.myshopify.com",
+  "storefront_url": "yourstore.com",
   "api_version": "2022-07"
 }
 ```
 
 For information about setting up the Shopify Admin API, see https://shopify.dev/docs/api/admin/getting-started
 
-### Manually Export Prices
+### Running Report 1-15 
 
-- The price fixer uses JSON files to get the current price for an item by its sku. The file should be formatted as below
+The fixer requires ABC report 1-15 to get updated product pricing. 
 
-```json
-[
-  { "sku": "123456", "price": 12.0 },
-  { "sku": "789100", "price": 100.0 }
-]
-```
+In your ABC client enter: 
 
-- Save this file somewhere you will remember, such as C:\Users\<username>\Desktop\exported_prices.json
-- Run the `shopify-price-fixer.exe` program you installed from GitHub
-- The program will prompt you for the path to a file containing exported bill info. Please provide the absolute path to this file. It should look like the following:
+* F10 - to go to the main menu 
+* 1 - to go to inventory reports menu
+* 15 - to select INVENTORY LIST PRICES & STOCK report 
+* S - to select only items that are stocked (This is optional but recommended if your store has many thousands of items)
+* {Enter the starting and ending SKU}
+* T - to run the report to a tab separated file 
 
-| Sample Run of Shopify Price Fixer |
-| :-------------------------------: |
-| ![example_shopify-price-fixer](/screenshots/shopify-price-fixer.png) |
+This should generate a file called `TabOutput.tsv` in your `Documents\My ABC Files` folder. The path to this file will need to be given to the fixer. 
 
-### Automatically Export Bills with AutoHotKey
+### Running the Fixer 
 
-- Run the export-abc-bill.ahk script by double clicking the export-abc-bill.ahk file wherever it is saved on the system
-- A small menu will open that will ask for the starting and ending bill IDs. This represents the first and last bills that you want to export
-  - You may omit the "Ending Bill ID" and the script will only export the Starting Bill
+* Navigate to the location of `shopify-price-fixer.exe` in your file browser and run the application. 
+* When prompted, enter or paste the path to the `TabOutput.tsv` file containing report 1-15. This will likely be something like `C:\Users\User\Documents\My ABC Files\TabOutput.tsv`
 
-| Export ABC Bill Script Form |
-| :-------------------------: |
-| ![example_export-abc-bill](/screenshots/export-bill.png) |
-
-- That is all the manual input that is required. The AHK scripts will handle generating all necessary reports, extracting necessary information from them, and submitting updated price info to Shopify. **_Do not touch the mouse or keyboard during this time!_** Doing so will interrupt the script.
