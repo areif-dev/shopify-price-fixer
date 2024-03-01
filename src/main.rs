@@ -126,7 +126,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let config = fixer::Config::read_config()?;
+    // Something is probably very wrong if the binary has no parent directory, but if it doesn't,
+    // switch everything to use the current working directory to be safe(r)
+    let parent_dir = match std::env::current_exe()?.parent() {
+        Some(p) => p.to_owned(),
+        None => PathBuf::from("."),
+    };
+
+    let config_path = match cli.config {
+        Some(p) => p,
+        None => parent_dir.join("config.json"),
+    };
+    let config = shopify_price_fixer::Config::read_config(&config_path)?;
     let log_to_stdout = !cli.write_logs;
     let abc_products = shopify_price_fixer::parse_report_1_15(&file);
     let shopify_products = shopify_price_fixer::all_shopify_products(&config).await?;
