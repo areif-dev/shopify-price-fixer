@@ -232,8 +232,11 @@ where
     let mut msg_str: String = msg.into();
     msg_str.push('\n');
 
+    let now = chrono::Utc::now();
+    let now_formatted = format!("{}", now.format("%Y-%m-%d %H:%M:%S"));
+
     if to_stdout {
-        print!("{}", msg_str);
+        print!("{} {}", now_formatted, msg_str);
         return Ok(());
     }
 
@@ -260,7 +263,7 @@ where
         .create(true)
         .append(true)
         .open(log_path)?;
-    log_file.write(&msg_str.as_bytes())?;
+    log_file.write(format!("{} {}", now_formatted, msg_str).as_bytes())?;
 
     Ok(())
 }
