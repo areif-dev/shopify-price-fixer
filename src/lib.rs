@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use reqwest::header::USER_AGENT;
 
@@ -52,7 +52,7 @@ impl Config {
     ///
     /// # Arguments
     ///
-    /// * None
+    /// * `path` - The path the the config file
     ///
     /// # Returns
     ///
@@ -61,14 +61,14 @@ impl Config {
     /// # Errors
     ///
     /// Returns an error string if it fails to read or parse the configuration file.
-    pub fn read_config() -> Result<Self, String> {
-        let config_str = match fs::read_to_string("./config.json") {
+    pub fn read_config(path: &PathBuf) -> Result<Self, String> {
+        let config_str = match fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => return Err("Could not read config file".to_string()),
         };
         let config: Config = match serde_json::from_str(&config_str) {
             Ok(c) => c,
-            Err(_) => return Err("Failed to parse config file. Must define business_domain, shopify_access_token, and api_version".to_string()),
+            Err(_) => return Err("Failed to parse config file. Must define business_url, storefront_url, shopify_access_token, and api_version".to_string()),
         };
 
         Ok(config)
@@ -237,13 +237,24 @@ where
         return Ok(());
     }
 
-    let log_path = match log {
-        Log::Adjusted => "./adjusted.txt",
-        Log::Equal => "./not_adjusted_equal.txt",
-        Log::Error => "./error.txt",
-        Log::Greater => "./not_adjusted_greater.txt",
-        Log::NotFound => "./not_found.txt",
+    // Something is probably very wrong if the binary has no parent directory, but if it doesn't,
+    // switch everything to use the current working directory to be safe(r)
+    let log_path_parent = match std::env::current_exe()?.parent() {
+        Some(p) => p.to_owned(),
+        None => PathBuf::from("."),
     };
+
+    let log_path = match log {
+        Log::Adjusted => log_path_parent.join("logs/adjusted.txt"),
+        Log::Equal => log_path_parent.join("logs/not_adjusted_equal.txt"),
+        Log::Error => log_path_parent.join("logs/error.txt"),
+        Log::Greater => log_path_parent.join("logs/not_adjusted_greater.txt"),
+        Log::NotFound => log_path_parent.join("logs/not_found.txt"),
+    };
+
+    if !log_path_parent.join("logs").exists() {
+        fs::create_dir(log_path_parent.join("logs"))?;
+    }
 
     let mut log_file = fs::OpenOptions::new()
         .create(true)
