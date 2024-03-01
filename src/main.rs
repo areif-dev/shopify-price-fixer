@@ -44,10 +44,10 @@ fn user_input_file_path() -> io::Result<PathBuf> {
 /// * Will return Err(reqwest::header::InvalidHeaderValue) if `content-type` is an invalid MIME
 /// type or if the API_ACCESS_TOKEN cannot be parsed
 fn create_client_with_headers(
+    config: &shopify_price_fixer::Config,
     content_type: String,
 ) -> Result<(reqwest::Client, HeaderMap), InvalidHeaderValue> {
-    let config = fixer::Config::read_config().unwrap();
-    let access_token = config.shopify_access_token;
+    let access_token = &config.shopify_access_token;
 
     let client = reqwest::Client::new();
     let mut headers = HeaderMap::new();
@@ -77,7 +77,7 @@ async fn update_shopify_price(
     id: u64,
     new_price: u32,
 ) -> Result<String, InvalidHeaderValue> {
-    let (client, headers) = create_client_with_headers("application/json".to_string())?;
+    let (client, headers) = create_client_with_headers(config, "application/json".to_string())?;
     let body = format!(
         "{{
             \"variant\": {{
