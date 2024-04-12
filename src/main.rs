@@ -133,6 +133,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => PathBuf::from("."),
     };
 
+    // Attempt to remove any existing log files. If no logs exist, ignore the resulting error
+    match fs::remove_dir_all(parent_dir.join("logs")) {
+        _ => (),
+    }
+
     let config_path = match cli.config {
         Some(p) => p,
         None => parent_dir.join("config.json"),
