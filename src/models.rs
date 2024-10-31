@@ -1,3 +1,6 @@
+use async_trait::async_trait;
+use sqlx_axum_mvc as sam;
+
 fn fix_check_digit(upc: &[u8]) -> Option<[u8; 12]> {
     let mut fixed = [0u8; 12];
     let mut sum1 = 0;
@@ -118,6 +121,51 @@ impl AbcProduct {
 
     pub fn stock(&self) -> f64 {
         self.stock
+    }
+}
+
+#[async_trait]
+impl sam::SqliteDbModel for AbcProduct {
+    type Error = sqlx::Error;
+
+    fn table_name() -> String {
+        "AbcProduct".to_string()
+    }
+
+    fn map_cols_to_vals(&self) -> sam::ColumnValueMap {
+        sam::ColumnValueMap::from([
+            (
+                "abc_product_id".to_string(),
+                sam::BasicType::Integer(self.abc_product_id),
+            ),
+            ("sku".to_string(), sam::BasicType::Text(self.sku.clone())),
+            ("desc".to_string(), sam::BasicType::Text(self.desc.clone())),
+            (
+                "upc".to_string(),
+                sam::BasicType::Text(self.upc.to_string()),
+            ),
+            ("list".to_string(), sam::BasicType::Integer(self.list)),
+            ("cost".to_string(), sam::BasicType::Integer(self.cost)),
+            ("stock".to_string(), sam::BasicType::Real(self.stock)),
+        ])
+    }
+
+    async fn create_table(pool: &sqlx::SqlitePool) -> Result<(), Self::Error> {
+        let query_str = format!(
+            r"create table if not exists {} (
+                abc_product_id integer primary key,
+                sku text not null,
+                desc text not null,
+                upc text not null,
+                list integer not null,
+                cost integer not null,
+                stock real not null
+            );",
+            Self::table_name()
+        );
+
+        sqlx::query(&query_str).execute(pool).await?;
+        Ok(())
     }
 }
 
