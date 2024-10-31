@@ -1,10 +1,11 @@
+use reqwest::header::USER_AGENT;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use reqwest::header::USER_AGENT;
+pub mod models;
 
 /// Interfaces with the Shopify REST API to keep prices up to date with the proprietary ABC
 /// accounting software. This program will only change a Shopify price if the price in ABC is
