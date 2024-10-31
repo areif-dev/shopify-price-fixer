@@ -49,6 +49,15 @@ impl Upc {
     }
 }
 
+impl ToOwned for Upc {
+    type Owned = Upc;
+
+    fn to_owned(&self) -> Self::Owned {
+        let bytes = self.upc;
+        Self::Owned { upc: bytes }
+    }
+}
+
 impl ToString for Upc {
     fn to_string(&self) -> String {
         let bytes = self.upc;
