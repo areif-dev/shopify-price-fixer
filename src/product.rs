@@ -12,34 +12,18 @@ fn price_from_str(price_str: &str) -> Result<i64, ParseFloatError> {
     Ok(iprice)
 }
 
-fn diff_files(old: PathBuf, new: PathBuf) -> Result<String, std::io::Error> {
-    let old = std::fs::read_to_string(old)?;
-    let new = std::fs::read_to_string(new)?;
-    let changes = similar::TextDiff::from_lines(&old, &new);
-    let mut inserts = String::new();
-    for change in changes.iter_all_changes() {
-        inserts = match change.tag() {
-            similar::ChangeTag::Insert => {
-                format!("{}\n{}", inserts, change)
-            }
-            _ => inserts,
-        }
-    }
-    Ok(inserts)
-}
-
 fn parse_abc_item_files(
-    old_item_path: PathBuf,
-    new_item_path: PathBuf,
-    old_posted_path: PathBuf,
-    new_posted_path: PathBuf,
-) -> Result<Vec<AbcProduct>, csv::Error> {
-    let item_diff = diff_files(old_item_path, new_item_path).or(Err(csv::Error::custom("IO error originating in `diff_files` passed on to `parse_abc_item_files` when parsing item data files")))?;
-    let posted_diff = diff_files(old_posted_path, new_posted_path).or(Err(csv::Error::custom("IO error originating in `diff_files` passed on to `parse_abc_item_files` when parsing posted data files")))?;
+    item_path: &str,
+    posted_path: &str,
+) -> Result<HashMap<String, AbcProduct>, csv::Error> {
     let mut item_data = csv::ReaderBuilder::new()
         .delimiter(b'\t')
         .has_headers(false)
-        .from_reader(item_diff.as_bytes());
+        .from_path(item_path)?;
+    let mut posted_data = csv::ReaderBuilder::new()
+        .delimiter(b'\t')
+        .has_headers(false)
+        .from_path(posted_path)?;
 
     let mut i = 0;
     let mut products = HashMap::new();
@@ -85,7 +69,7 @@ fn parse_abc_item_files(
             i
         ))))?;
         products.insert(
-            sku,
+            sku.clone(),
             AbcProduct {
                 sku,
                 desc,
@@ -97,18 +81,14 @@ fn parse_abc_item_files(
         );
     }
 
-    let mut posted_data = csv::ReaderBuilder::new()
-        .delimiter(b'\t')
-        .has_headers(false)
-        .from_reader(posted_diff.as_bytes());
     let mut i = 0;
-    while let Some(row) = item_data.records().next() {
+    while let Some(row) = posted_data.records().next() {
         i += 1;
         let row = row?;
         let sku = row
             .get(0)
             .ok_or(csv::Error::custom(format!(
-                "Cannot deserialize sku in row {} of posted items"
+                "Cannot deserialize sku in row {} of posted items",
                 i
             )))?
             .to_string();
@@ -123,11 +103,20 @@ fn parse_abc_item_files(
             "Cannot parse f64 from stock_str in row {} of posted items",
             i
         ))))?;
-
+        let mut existing_record = products
+            .get(&sku)
+            .ok_or(csv::Error::custom(format!(
+                "Cannot find existing product for item with sku {} in row {} of posted_data",
+                &sku, i
+            )))?
+            .clone();
+        existing_record.stock = stock;
+        products.insert(sku, existing_record);
     }
     Ok(products)
 }
 
+#[derive(Debug, Clone)]
 pub struct AbcProduct {
     sku: String,
     desc: String,

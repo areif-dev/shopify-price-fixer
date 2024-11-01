@@ -5,7 +5,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub mod models;
+pub mod product;
+pub mod upc;
 
 /// Interfaces with the Shopify REST API to keep prices up to date with the proprietary ABC
 /// accounting software. This program will only change a Shopify price if the price in ABC is
