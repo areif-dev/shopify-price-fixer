@@ -1,31 +1,11 @@
-use std::io::Write;
 use std::path::PathBuf;
-use std::{cmp, fs, io};
+use std::{cmp, fs};
 
 use clap::Parser;
-use shopify_price_fixer as fixer;
+use shopify_price_fixer::{self as fixer, product};
 
 use reqwest::header::HeaderMap;
 use reqwest::header::InvalidHeaderValue;
-
-/// Prompts the user for a file path to an ABC 2-10 report
-///
-/// # Returns
-///
-/// If no errors are encountered, return the string value entered by the user. This should be a
-/// path to a valid file
-///
-/// # Errors
-///
-/// Will return an Err(std::io::Error) if the input operation fails
-fn user_input_file_path() -> io::Result<PathBuf> {
-    print!("Enter the path to the exported ABC report: ");
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-
-    Ok(PathBuf::from(input.trim()))
-}
 
 /// Initialize a reqwest client and its HeaderMap for sending HTTP requests
 ///
@@ -72,10 +52,11 @@ fn create_client_with_headers(
 /// # Errors
 ///
 /// Thread will panic if sending the request fails or if fetching the response fails
-async fn update_shopify_price(
+async fn update_shopify_listing(
     config: &fixer::Config,
     id: u64,
-    new_price: u32,
+    new_price: i64,
+    new_stock: f64,
 ) -> Result<String, InvalidHeaderValue> {
     let (client, headers) = create_client_with_headers(config, "application/json".to_string())?;
     let body = format!(
@@ -84,7 +65,7 @@ async fn update_shopify_price(
                 \"price\": \"{}\"
             }}
         }}",
-        (new_price as f32 / 100.0)
+        (new_price as f32 / 100.0),
     );
 
     let url = format!("https://{}/admin/variants/{}.json", config.business_url, id);
@@ -106,25 +87,8 @@ async fn update_shopify_price(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = fixer::Cli::parse();
-
-    let mut file_path = match cli.report {
-        Some(p) => p,
-        None => user_input_file_path()?,
-    };
-
-    let file: String;
-    loop {
-        match fs::read_to_string(file_path) {
-            Ok(f) => {
-                file = f;
-                break;
-            }
-            Err(_) => {
-                println!("You have entered a path that does not exist");
-                file_path = user_input_file_path()?;
-            }
-        }
-    }
+    let item_data_path = cli.item_data;
+    let posted_data_path = cli.posted_data;
 
     // Something is probably very wrong if the binary has no parent directory, but if it doesn't,
     // switch everything to use the current working directory to be safe(r)
@@ -138,17 +102,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => (),
     }
 
-    let config_path = match cli.config {
-        Some(p) => p,
-        None => parent_dir.join("config.json"),
-    };
-    let config = shopify_price_fixer::Config::read_config(&config_path)?;
     let log_to_stdout = !cli.write_logs;
-    let abc_products = shopify_price_fixer::parse_report_1_15(&file);
+    let config = match shopify_price_fixer::Config::read_config(&cli.config) {
+        Ok(c) => c,
+        Err(e) => {
+            fixer::log(
+                log_to_stdout,
+                fixer::Log::Error,
+                format!(
+                    "Encountered {} while trying to read config file at {:?}",
+                    e, &cli.config
+                ),
+            )?;
+            return Err(e)?;
+        }
+    };
+    let abc_products = match product::parse_abc_item_files(&item_data_path, &posted_data_path) {
+        Ok(p) => p,
+        Err(e) => {
+            fixer::log(
+                log_to_stdout,
+                fixer::Log::Error,
+                format!(
+                    "Failed to parse abc products from data files with error: {}",
+                    e
+                ),
+            )?;
+            return Err(e)?;
+        }
+    };
     let shopify_products = shopify_price_fixer::all_shopify_products(&config).await?;
 
     for (sku, (shopify_price, shopify_id)) in shopify_products {
-        let abc_price = match abc_products.get(&sku) {
+        let abc_product = match abc_products.get(&sku) {
             Some(p) => p,
             None => {
                 fixer::log(
@@ -160,52 +146,100 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        match shopify_price.cmp(abc_price) {
-            cmp::Ordering::Less => {
-                fixer::log(
-                    log_to_stdout,
-                    fixer::Log::Adjusted,
-                    format!(
-                        "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-                        sku, abc_price, shopify_price
-                    ),
-                )?;
+        fixer::log(
+            log_to_stdout,
+            fixer::Log::Adjusted,
+            format!(
+                "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents, {} stock",
+                sku,
+                &abc_product.list(),
+                shopify_price,
+                &abc_product.stock(),
+            ),
+        )?;
 
-                // Dry run means that no prices should actually be changed, so skip the update step
-                if cli.dry_run {
-                    continue;
-                }
-
-                match update_shopify_price(&config, shopify_id, abc_price.to_owned()).await {
-                    Ok(_) => (),
-                    Err(e) => fixer::log(
-                        log_to_stdout,
-                        fixer::Log::Error,
-                        format!("ERROR updating product with id {}: {:?}", shopify_id, e),
-                    )?,
-                };
-            }
-            cmp::Ordering::Greater => {
-                fixer::log(
-                    log_to_stdout,
-                    fixer::Log::Greater,
-                    format!(
-                        "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-                        sku, abc_price, shopify_price
-                    ),
-                )?;
-            }
-            cmp::Ordering::Equal => {
-                fixer::log(
-                    log_to_stdout,
-                    fixer::Log::Equal,
-                    format!(
-                        "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-                        sku, abc_price, shopify_price
-                    ),
-                )?;
-            }
+        // Dry run means that no prices should actually be changed, so skip the update step
+        if cli.dry_run {
+            continue;
         }
+
+        match update_shopify_listing(
+            &config,
+            shopify_id,
+            abc_product.list().to_owned().max(shopify_price as i64),
+            abc_product.stock(),
+        )
+        .await
+        {
+            Ok(r) => {
+                println!("{}", r);
+            }
+            Err(e) => fixer::log(
+                log_to_stdout,
+                fixer::Log::Error,
+                format!("ERROR updating product with id {}: {:?}", shopify_id, e),
+            )?,
+        };
+
+        // match (shopify_price as i64).cmp(&abc_product.list()) {
+        //     cmp::Ordering::Less => {
+        //         fixer::log(
+        //             log_to_stdout,
+        //             fixer::Log::Adjusted,
+        //             format!(
+        //                 "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+        //                 sku,
+        //                 &abc_product.list(),
+        //                 shopify_price
+        //             ),
+        //         )?;
+
+        //         // Dry run means that no prices should actually be changed, so skip the update step
+        //         if cli.dry_run {
+        //             continue;
+        //         }
+
+        //         match update_shopify_listing(
+        //             &config,
+        //             shopify_id,
+        //             abc_product.list().to_owned(),
+        //             abc_product.stock(),
+        //         )
+        //         .await
+        //         {
+        //             Ok(_) => (),
+        //             Err(e) => fixer::log(
+        //                 log_to_stdout,
+        //                 fixer::Log::Error,
+        //                 format!("ERROR updating product with id {}: {:?}", shopify_id, e),
+        //             )?,
+        //         };
+        //     }
+        //     cmp::Ordering::Greater => {
+        //         fixer::log(
+        //             log_to_stdout,
+        //             fixer::Log::Greater,
+        //             format!(
+        //                 "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+        //                 sku,
+        //                 &abc_product.list(),
+        //                 shopify_price
+        //             ),
+        //         )?;
+        //     }
+        //     cmp::Ordering::Equal => {
+        //         fixer::log(
+        //             log_to_stdout,
+        //             fixer::Log::Equal,
+        //             format!(
+        //                 "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+        //                 sku,
+        //                 &abc_product.list(),
+        //                 shopify_price
+        //             ),
+        //         )?;
+        //     }
+        // }
     }
 
     Ok(())

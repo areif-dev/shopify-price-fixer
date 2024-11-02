@@ -12,7 +12,7 @@ fn price_from_str(price_str: &str) -> Result<i64, ParseFloatError> {
     Ok(iprice)
 }
 
-fn parse_abc_item_files(
+pub fn parse_abc_item_files(
     item_path: &str,
     posted_path: &str,
 ) -> Result<HashMap<String, AbcProduct>, csv::Error> {
@@ -44,7 +44,7 @@ fn parse_abc_item_files(
                 i
             )))?
             .to_string();
-        let upc_str = row.get(1).ok_or(csv::Error::custom(format!(
+        let upc_str = row.get(43).ok_or(csv::Error::custom(format!(
             "Cannot fetch upcs in row {}",
             i
         )))?;
