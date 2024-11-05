@@ -1,6 +1,137 @@
-use crate::upc::Upc;
-use serde::ser::Error;
+use crate::{create_client_with_headers, upc::Upc, Config, FixerError};
+use reqwest::header::InvalidHeaderValue;
+use serde::{ser::Error, Deserialize};
 use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Response {
+    pub data: Data,
+    pub extensions: Extensions,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Data {
+    pub product_variants: ProductVariants,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductVariants {
+    pub edges: Vec<Edge>,
+    pub page_info: PageInfo,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Edge {
+    pub node: Node,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Node {
+    pub id: String,
+    pub sku: String,
+    pub display_name: String,
+    pub price: String,
+    pub barcode: String,
+    pub available_for_sale: bool,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PageInfo {
+    pub has_next_page: bool,
+    pub end_cursor: String,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Extensions {
+    pub cost: Cost,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Cost {
+    pub requested_query_cost: u32,
+    pub actual_query_cost: u32,
+    pub throttle_status: ThrottleStatus,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ThrottleStatus {
+    pub maximum_available: u32,
+    pub currently_available: u32,
+    pub restore_rate: u32,
+}
+
+async fn fetch_shopify_products(config: &Config) -> Result<Vec<Node>, FixerError> {
+    let (client, headers) =
+        create_client_with_headers(config, "application/json").or(Err(FixerError::Custom(
+            "Encountered InvalidHeaderValue when building client to fetch shopify products"
+                .to_string(),
+        )))?;
+    let mut products = Vec::new();
+    let mut has_next_page = true;
+    let mut cursor = None;
+
+    while has_next_page {
+        // Define the GraphQL query with an optional cursor for pagination.
+        let query = serde_json::json!({
+            "query": format!(
+                r#"
+                {{
+                    productVariants(first: 250, after: {}) {{
+                        edges {{
+                            node {{
+                                id
+                                sku
+                                displayName
+                                price
+                                barcode
+                                availableForSale
+                            }}
+                        }}
+                        pageInfo {{
+                            hasNextPage
+                            endCursor
+                        }}
+                    }}
+                }}"#,
+                cursor.map_or("null".to_string(), |c| format!("\"{}\"", c))
+            )
+        });
+
+        let url = format!(
+            "https://{}/admin/api/2024-10/graphql.json",
+            config.business_url
+        );
+
+        let response = client
+            .post(&url)
+            .headers(headers)
+            .body(query.to_string())
+            .send()
+            .await?;
+
+        let text = response.text().await?;
+        let graphql: Response = serde_json::from_str(&text).or(Err(()))
+        // Collect nodes from this page
+        for edge in response.data.product_variants.edges {
+            products.push(edge.node);
+        }
+
+        // Update pagination info
+        has_next_page = response.data.product_variants.page_info.has_next_page;
+        cursor = response.data.product_variants.page_info.end_cursor;
+    }
+
+    Ok(products)
+}
 
 fn price_from_str(price_str: &str) -> Result<i64, ParseFloatError> {
     let price_str: String = price_str
