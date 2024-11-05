@@ -1,4 +1,4 @@
-use reqwest::header::USER_AGENT;
+use reqwest::header::{HeaderMap, InvalidHeaderValue, USER_AGENT};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
@@ -18,6 +18,36 @@ impl From<reqwest::Error> for FixerError {
     fn from(value: reqwest::Error) -> Self {
         Self::ReqwestError(value)
     }
+}
+
+/// Initialize a reqwest client and its HeaderMap for sending HTTP requests
+///
+/// # Arguments
+///
+/// * `content-type` - The MIME type of the data being sent in the request. The price fixer only
+/// uses "application/json" and "application/graphql", but any valid contenty type should work
+///
+/// # Returns
+///
+/// If successful, return a tuple containing (reqwest::Client, reqwest::header::HeaderMap)
+///
+/// # Errors
+///
+/// * The thread will panic if the config file does not exist or is missing information
+/// * Will return Err(reqwest::header::InvalidHeaderValue) if `content-type` is an invalid MIME
+/// type or if the API_ACCESS_TOKEN cannot be parsed
+fn create_client_with_headers(
+    config: &Config,
+    content_type: &str,
+) -> Result<(reqwest::Client, HeaderMap), InvalidHeaderValue> {
+    let access_token = &config.shopify_access_token;
+
+    let client = reqwest::Client::new();
+    let mut headers = HeaderMap::new();
+    headers.insert("Content-Type", content_type.parse()?);
+    headers.insert("X-Shopify-Access-Token", access_token.parse()?);
+
+    Ok((client, headers))
 }
 
 /// Interfaces with the Shopify REST API to keep prices up to date with the proprietary ABC
