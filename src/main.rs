@@ -131,116 +131,120 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(e)?;
         }
     };
-    let shopify_products = shopify_price_fixer::all_shopify_products(&config).await?;
+    let shopify_products = fixer::product::fetch_shopify_products(&config).await?;
+    println!("{:#?}", shopify_products);
 
-    for (sku, (shopify_price, shopify_id)) in shopify_products {
-        let abc_product = match abc_products.get(&sku) {
-            Some(p) => p,
-            None => {
-                fixer::log(
-                    log_to_stdout,
-                    fixer::Log::NotFound,
-                    format!("NOT FOUND Item {} Shopify: {} cents", sku, shopify_price),
-                )?;
-                continue;
-            }
-        };
+    // TODO: Create another hashmap of fixed abc upcs to their abc skus, so you can mutate any
+    // shopify skus that do not match up 
 
-        fixer::log(
-            log_to_stdout,
-            fixer::Log::Adjusted,
-            format!(
-                "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents, {} stock",
-                sku,
-                &abc_product.list(),
-                shopify_price,
-                &abc_product.stock(),
-            ),
-        )?;
+    // for (sku, (shopify_price, shopify_id)) in shopify_products {
+    //     let abc_product = match abc_products.get(&sku) {
+    //         Some(p) => p,
+    //         None => {
+    //             fixer::log(
+    //                 log_to_stdout,
+    //                 fixer::Log::NotFound,
+    //                 format!("NOT FOUND Item {} Shopify: {} cents", sku, shopify_price),
+    //             )?;
+    //             continue;
+    //         }
+    //     };
 
-        // Dry run means that no prices should actually be changed, so skip the update step
-        if cli.dry_run {
-            continue;
-        }
+    //     fixer::log(
+    //         log_to_stdout,
+    //         fixer::Log::Adjusted,
+    //         format!(
+    //             "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents, {} stock",
+    //             sku,
+    //             &abc_product.list(),
+    //             shopify_price,
+    //             &abc_product.stock(),
+    //         ),
+    //     )?;
 
-        match update_shopify_listing(
-            &config,
-            shopify_id,
-            abc_product.list().to_owned().max(shopify_price as i64),
-            abc_product.stock(),
-        )
-        .await
-        {
-            Ok(r) => {
-                println!("{}", r);
-            }
-            Err(e) => fixer::log(
-                log_to_stdout,
-                fixer::Log::Error,
-                format!("ERROR updating product with id {}: {:?}", shopify_id, e),
-            )?,
-        };
+    //     // Dry run means that no prices should actually be changed, so skip the update step
+    //     if cli.dry_run {
+    //         continue;
+    //     }
 
-        // match (shopify_price as i64).cmp(&abc_product.list()) {
-        //     cmp::Ordering::Less => {
-        //         fixer::log(
-        //             log_to_stdout,
-        //             fixer::Log::Adjusted,
-        //             format!(
-        //                 "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-        //                 sku,
-        //                 &abc_product.list(),
-        //                 shopify_price
-        //             ),
-        //         )?;
+    //     match update_shopify_listing(
+    //         &config,
+    //         shopify_id,
+    //         abc_product.list().to_owned().max(shopify_price as i64),
+    //         abc_product.stock(),
+    //     )
+    //     .await
+    //     {
+    //         Ok(r) => {
+    //             println!("{}", r);
+    //         }
+    //         Err(e) => fixer::log(
+    //             log_to_stdout,
+    //             fixer::Log::Error,
+    //             format!("ERROR updating product with id {}: {:?}", shopify_id, e),
+    //         )?,
+    //     };
 
-        //         // Dry run means that no prices should actually be changed, so skip the update step
-        //         if cli.dry_run {
-        //             continue;
-        //         }
+    // match (shopify_price as i64).cmp(&abc_product.list()) {
+    //     cmp::Ordering::Less => {
+    //         fixer::log(
+    //             log_to_stdout,
+    //             fixer::Log::Adjusted,
+    //             format!(
+    //                 "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+    //                 sku,
+    //                 &abc_product.list(),
+    //                 shopify_price
+    //             ),
+    //         )?;
 
-        //         match update_shopify_listing(
-        //             &config,
-        //             shopify_id,
-        //             abc_product.list().to_owned(),
-        //             abc_product.stock(),
-        //         )
-        //         .await
-        //         {
-        //             Ok(_) => (),
-        //             Err(e) => fixer::log(
-        //                 log_to_stdout,
-        //                 fixer::Log::Error,
-        //                 format!("ERROR updating product with id {}: {:?}", shopify_id, e),
-        //             )?,
-        //         };
-        //     }
-        //     cmp::Ordering::Greater => {
-        //         fixer::log(
-        //             log_to_stdout,
-        //             fixer::Log::Greater,
-        //             format!(
-        //                 "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-        //                 sku,
-        //                 &abc_product.list(),
-        //                 shopify_price
-        //             ),
-        //         )?;
-        //     }
-        //     cmp::Ordering::Equal => {
-        //         fixer::log(
-        //             log_to_stdout,
-        //             fixer::Log::Equal,
-        //             format!(
-        //                 "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-        //                 sku,
-        //                 &abc_product.list(),
-        //                 shopify_price
-        //             ),
-        //         )?;
-        //     }
-        // }
-    }
+    //         // Dry run means that no prices should actually be changed, so skip the update step
+    //         if cli.dry_run {
+    //             continue;
+    //         }
+
+    //         match update_shopify_listing(
+    //             &config,
+    //             shopify_id,
+    //             abc_product.list().to_owned(),
+    //             abc_product.stock(),
+    //         )
+    //         .await
+    //         {
+    //             Ok(_) => (),
+    //             Err(e) => fixer::log(
+    //                 log_to_stdout,
+    //                 fixer::Log::Error,
+    //                 format!("ERROR updating product with id {}: {:?}", shopify_id, e),
+    //             )?,
+    //         };
+    //     }
+    //     cmp::Ordering::Greater => {
+    //         fixer::log(
+    //             log_to_stdout,
+    //             fixer::Log::Greater,
+    //             format!(
+    //                 "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+    //                 sku,
+    //                 &abc_product.list(),
+    //                 shopify_price
+    //             ),
+    //         )?;
+    //     }
+    //     cmp::Ordering::Equal => {
+    //         fixer::log(
+    //             log_to_stdout,
+    //             fixer::Log::Equal,
+    //             format!(
+    //                 "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
+    //                 sku,
+    //                 &abc_product.list(),
+    //                 shopify_price
+    //             ),
+    //         )?;
+    //     }
+    // }
+    // }
 
     Ok(())
 }

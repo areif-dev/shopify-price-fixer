@@ -7,7 +7,6 @@ use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
 #[serde(rename_all = "camelCase")]
 pub struct Response {
     pub data: Data,
-    pub extensions: Extensions,
 }
 
 #[derive(Deserialize, Debug)]
@@ -33,10 +32,10 @@ pub struct Edge {
 #[serde(rename_all = "camelCase")]
 pub struct Node {
     pub id: String,
-    pub sku: String,
+    pub sku: Option<String>,
     pub display_name: String,
     pub price: String,
-    pub barcode: String,
+    pub barcode: Option<String>,
     pub available_for_sale: bool,
 }
 
@@ -45,12 +44,7 @@ pub struct Node {
 pub struct PageInfo {
     pub has_next_page: bool,
     pub end_cursor: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Extensions {
-    pub cost: Cost,
+    pub start_cursor: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -69,7 +63,34 @@ pub struct ThrottleStatus {
     pub restore_rate: u32,
 }
 
-async fn fetch_shopify_products(config: &Config) -> Result<Vec<Node>, FixerError> {
+#[derive(Debug)]
+pub struct ShopifyProduct {
+    pub id: String,
+    pub sku: Option<String>,
+    pub display_name: String,
+    pub price: String,
+    pub barcode: Option<Upc>,
+    pub available_for_sale: bool,
+}
+
+impl From<Node> for ShopifyProduct {
+    fn from(value: Node) -> Self {
+        let barcode = match value.barcode {
+            Some(b) => Upc::try_from(b).ok(),
+            None => None,
+        };
+        Self {
+            id: value.id,
+            sku: value.sku,
+            display_name: value.display_name,
+            price: value.price,
+            barcode,
+            available_for_sale: value.available_for_sale,
+        }
+    }
+}
+
+pub async fn fetch_shopify_products(config: &Config) -> Result<Vec<ShopifyProduct>, FixerError> {
     let (client, headers) =
         create_client_with_headers(config, "application/json").or(Err(FixerError::Custom(
             "Encountered InvalidHeaderValue when building client to fetch shopify products"
@@ -85,7 +106,7 @@ async fn fetch_shopify_products(config: &Config) -> Result<Vec<Node>, FixerError
             "query": format!(
                 r#"
                 {{
-                    productVariants(first: 250, after: {}) {{
+                    productVariants(first: 250{}) {{
                         edges {{
                             node {{
                                 id
@@ -99,10 +120,11 @@ async fn fetch_shopify_products(config: &Config) -> Result<Vec<Node>, FixerError
                         pageInfo {{
                             hasNextPage
                             endCursor
+                            startCursor
                         }}
                     }}
                 }}"#,
-                cursor.map_or("null".to_string(), |c| format!("\"{}\"", c))
+                cursor.map_or("".to_string(), |c| format!(" after: \"{}\"", c))
             )
         });
 
@@ -113,21 +135,19 @@ async fn fetch_shopify_products(config: &Config) -> Result<Vec<Node>, FixerError
 
         let response = client
             .post(&url)
-            .headers(headers)
+            .headers(headers.to_owned())
             .body(query.to_string())
             .send()
             .await?;
 
         let text = response.text().await?;
-        let graphql: Response = serde_json::from_str(&text).or(Err(()))
-        // Collect nodes from this page
-        for edge in response.data.product_variants.edges {
-            products.push(edge.node);
-        }
+        let graphql: Response = serde_json::from_str(&text)?;
+        has_next_page = graphql.data.product_variants.page_info.has_next_page;
+        cursor = Some(graphql.data.product_variants.page_info.end_cursor);
 
-        // Update pagination info
-        has_next_page = response.data.product_variants.page_info.has_next_page;
-        cursor = response.data.product_variants.page_info.end_cursor;
+        for edge in graphql.data.product_variants.edges {
+            products.push(ShopifyProduct::from(edge.node));
+        }
     }
 
     Ok(products)

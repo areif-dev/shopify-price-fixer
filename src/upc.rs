@@ -1,17 +1,39 @@
+use serde::{Deserialize, Deserializer};
+
 #[derive(Debug)]
 pub enum UpcError {
     InvalidLength,
     NonNumericCharacter,
 }
 
-#[derive(Debug, Clone)]
+impl std::fmt::Display for UpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for UpcError {}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Upc {
     upc: [u8; 12],
 }
 
+// Custom deserialization function for `Upc`
+pub fn deserialize_optional_upc<'de, D>(deserializer: D) -> Result<Option<Upc>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let barcode_str_opt = Option::<String>::deserialize(deserializer)?;
+    match barcode_str_opt {
+        Some(s) => Upc::try_from(s).map(Some).map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
+}
+
 impl Upc {
     fn normalize(unformatted: &str) -> Option<Upc> {
-        let upc: Vec<u8> = unformatted
+        let mut upc: Vec<u8> = unformatted
             .chars()
             .filter_map(|c| {
                 if let Some(d) = c.to_digit(10) {
@@ -20,6 +42,12 @@ impl Upc {
                 None
             })
             .collect();
+
+        // If there are more than 12 bytes to the upc, ignore the first several digits, as these
+        // are most likely leading and extra 0s
+        if upc.len() > 12 {
+            upc = Vec::from(upc.get(upc.len() - 12..)?);
+        }
         Upc::fix_check_digit(&upc)
     }
 
@@ -51,16 +79,25 @@ impl Upc {
 
     pub fn try_from_str_like<S>(string_like: S) -> Result<Upc, UpcError>
     where
-        S: AsRef<str>,
+        S: Into<String>,
     {
-        let s = string_like.as_ref();
+        let s: String = string_like.into();
 
-        let mut upc_bytes = [0u8; 12];
-        for (i, c) in s.chars().enumerate() {
+        let mut upc_bytes = Vec::new();
+        for c in s.chars() {
             match c.to_digit(10) {
-                Some(digit) => upc_bytes[i] = digit as u8,
+                Some(digit) => upc_bytes.push(digit as u8),
                 None => return Err(UpcError::NonNumericCharacter),
             }
+        }
+        // If there are more than 12 bytes to the upc, ignore the first several digits, as these
+        // are most likely leading and extra 0s
+        if upc_bytes.len() > 12 {
+            upc_bytes = Vec::from(
+                upc_bytes
+                    .get(upc_bytes.len() - 12..)
+                    .ok_or(UpcError::InvalidLength)?,
+            );
         }
         let upc = Upc::fix_check_digit(&upc_bytes).ok_or(UpcError::InvalidLength)?;
         Ok(upc)

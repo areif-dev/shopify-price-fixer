@@ -11,14 +11,29 @@ pub mod upc;
 #[derive(Debug)]
 pub enum FixerError {
     Custom(String),
-    ReqwestError(reqwest::Error),
+    SerdeJson(serde_json::Error),
+    Reqwest(reqwest::Error),
+}
+
+impl std::fmt::Display for FixerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl From<reqwest::Error> for FixerError {
     fn from(value: reqwest::Error) -> Self {
-        Self::ReqwestError(value)
+        Self::Reqwest(value)
     }
 }
+
+impl From<serde_json::Error> for FixerError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::SerdeJson(value)
+    }
+}
+
+impl std::error::Error for FixerError {}
 
 /// Initialize a reqwest client and its HeaderMap for sending HTTP requests
 ///
