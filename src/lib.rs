@@ -8,6 +8,18 @@ use std::path::{Path, PathBuf};
 pub mod product;
 pub mod upc;
 
+#[derive(Debug)]
+pub enum FixerError {
+    Custom(String),
+    ReqwestError(reqwest::Error),
+}
+
+impl From<reqwest::Error> for FixerError {
+    fn from(value: reqwest::Error) -> Self {
+        Self::ReqwestError(value)
+    }
+}
+
 /// Interfaces with the Shopify REST API to keep prices up to date with the proprietary ABC
 /// accounting software. This program will only change a Shopify price if the price in ABC is
 /// greater than what is currently in Shopify.
