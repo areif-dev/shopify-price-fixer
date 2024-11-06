@@ -1,7 +1,6 @@
 use crate::{create_client_with_headers, upc::Upc, Config, FixerError};
-use reqwest::header::InvalidHeaderValue;
 use serde::{ser::Error, Deserialize};
-use std::{collections::HashMap, num::ParseFloatError, path::PathBuf};
+use std::{collections::HashMap, num::ParseFloatError};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +36,13 @@ pub struct Node {
     pub price: String,
     pub barcode: Option<String>,
     pub available_for_sale: bool,
+    pub product: Product,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Product {
+    pub id: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -66,27 +72,39 @@ pub struct ThrottleStatus {
 #[derive(Debug)]
 pub struct ShopifyProduct {
     pub id: String,
-    pub sku: Option<String>,
+    pub sku: String,
     pub display_name: String,
-    pub price: String,
+    pub price: i64,
     pub barcode: Option<Upc>,
     pub available_for_sale: bool,
+    pub product_id: String,
 }
 
-impl From<Node> for ShopifyProduct {
-    fn from(value: Node) -> Self {
+impl TryFrom<Node> for ShopifyProduct {
+    type Error = FixerError;
+
+    fn try_from(value: Node) -> Result<Self, Self::Error> {
         let barcode = match value.barcode {
             Some(b) => Upc::try_from(b).ok(),
             None => None,
         };
-        Self {
+        let price = price_from_str(&value.price).or(Err(FixerError::Custom(format!(
+            "Could not parse float from {} for Node with id {}",
+            &value.price, &value.id
+        ))))?;
+        let sku = &value.sku.ok_or(FixerError::Custom(format!(
+            "Missing SKU for Node with id {}",
+            &value.id,
+        )))?;
+        Ok(Self {
             id: value.id,
-            sku: value.sku,
+            sku: sku.to_owned(),
             display_name: value.display_name,
-            price: value.price,
+            price,
             barcode,
             available_for_sale: value.available_for_sale,
-        }
+            product_id: value.product.id,
+        })
     }
 }
 
@@ -115,6 +133,9 @@ pub async fn fetch_shopify_products(config: &Config) -> Result<Vec<ShopifyProduc
                                 price
                                 barcode
                                 availableForSale
+                                product {{
+                                    id 
+                                }}
                             }}
                         }}
                         pageInfo {{
@@ -146,7 +167,7 @@ pub async fn fetch_shopify_products(config: &Config) -> Result<Vec<ShopifyProduc
         cursor = Some(graphql.data.product_variants.page_info.end_cursor);
 
         for edge in graphql.data.product_variants.edges {
-            products.push(ShopifyProduct::from(edge.node));
+            products.push(ShopifyProduct::try_from(edge.node)?);
         }
     }
 
@@ -199,7 +220,7 @@ pub fn parse_abc_item_files(
             "Cannot fetch upcs in row {}",
             i
         )))?;
-        let upcs = Upc::from_abc_upc_list(upc_str)
+        let upcs: Vec<Upc> = Upc::from_abc_upc_list(upc_str)
             .iter()
             .filter_map(|upc| upc.to_owned())
             .collect();
@@ -219,6 +240,7 @@ pub fn parse_abc_item_files(
             "Cannot parse a price in cents for cost in row {}",
             i
         ))))?;
+
         products.insert(
             sku.clone(),
             AbcProduct {
@@ -265,6 +287,22 @@ pub fn parse_abc_item_files(
         products.insert(sku, existing_record);
     }
     Ok(products)
+}
+
+pub fn map_upcs(
+    existing_map: &HashMap<String, AbcProduct>,
+) -> (HashMap<String, AbcProduct>, Vec<Upc>) {
+    let mut upc_map = HashMap::new();
+    let mut duplicates = Vec::new();
+    for (_sku, product) in existing_map {
+        for upc in product.upcs.iter() {
+            let old = upc_map.insert(upc.to_string(), product.to_owned());
+            if let Some(_) = old {
+                duplicates.push(upc.to_owned());
+            }
+        }
+    }
+    (upc_map, duplicates)
 }
 
 #[derive(Debug, Clone)]

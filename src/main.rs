@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::{cmp, fs};
 
 use clap::Parser;
-use shopify_price_fixer::{self as fixer, product};
+use shopify_price_fixer::product::{map_upcs, AbcProduct, ShopifyProduct};
+use shopify_price_fixer::{self as fixer, product, FixerError};
 
 use reqwest::header::HeaderMap;
 use reqwest::header::InvalidHeaderValue;
@@ -54,32 +55,59 @@ fn create_client_with_headers(
 /// Thread will panic if sending the request fails or if fetching the response fails
 async fn update_shopify_listing(
     config: &fixer::Config,
-    id: u64,
-    new_price: i64,
-    new_stock: f64,
-) -> Result<String, InvalidHeaderValue> {
-    let (client, headers) = create_client_with_headers(config, "application/json".to_string())?;
-    let body = format!(
-        "{{
-            \"variant\": {{
-                \"price\": \"{}\"
+    shopify_product: &ShopifyProduct,
+    abc_product: &AbcProduct,
+) -> Result<String, FixerError> {
+    let (client, headers) = create_client_with_headers(config, "application/json".to_string()).or(
+        Err(FixerError::Custom(
+            "Found InvalidHeaderValue when updating shopify product".to_string(),
+        )),
+    )?;
+    let new_price = abc_product.list().max(shopify_product.price);
+    let query = serde_json::json!({
+        "query": r#"
+            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {{
+              productVariantsBulkUpdate(productId: $productId, variants: $variants) {{
+                product {{
+                  id
+                }}
+                productVariants {{
+                  id
+                  sku 
+                  price 
+                }}
+                userErrors {{
+                  field
+                  message
+                }}
+              }}
             }}
-        }}",
-        (new_price as f32 / 100.0),
-    );
+    "#,
+        "variables": {
+            "productId": shopify_product.product_id,
+            "variants": [
+              {
+                "id": shopify_product.id,
+                "sku": abc_product.sku(),
+                "price": format!("{:0.2}", (new_price as f64) / 100.0)
+              }
+            ]
+        }
+    });
 
-    let url = format!("https://{}/admin/variants/{}.json", config.business_url, id);
+    let url = format!(
+        "https://{}/admin/api/{}/graphql.json",
+        config.business_url, config.api_version
+    );
 
     let res = client
         .put(url)
         .headers(headers)
-        .body(body)
+        .body(query.to_string())
         .send()
-        .await
-        .unwrap()
+        .await?
         .text()
-        .await
-        .unwrap();
+        .await?;
 
     Ok(res)
 }
@@ -131,120 +159,86 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(e)?;
         }
     };
+    let (upc_map, duplicates) = map_upcs(&abc_products);
+    for dup in duplicates {
+        fixer::log(
+            log_to_stdout,
+            fixer::Log::DuplicateAbcUpcs,
+            format!("DUPLICATE UPC {}", dup.to_string()),
+        )?;
+    }
     let shopify_products = fixer::product::fetch_shopify_products(&config).await?;
-    println!("{:#?}", shopify_products);
 
-    // TODO: Create another hashmap of fixed abc upcs to their abc skus, so you can mutate any
-    // shopify skus that do not match up 
+    for shopify_product in shopify_products {
+        let abc_product = match abc_products.get(&shopify_product.sku) {
+            Some(p) => p,
+            None => {
+                let barcode = match &shopify_product.barcode {
+                    Some(u) => u.to_string(),
+                    None => "".to_string(),
+                };
+                match upc_map.get(&barcode) {
+                    Some(p) => p,
+                    None => {
+                        fixer::log(
+                            log_to_stdout,
+                            fixer::Log::NotFound,
+                            format!(
+                                "NOT FOUND Item {} Shopify: {} cents",
+                                &shopify_product.sku, &shopify_product.price
+                            ),
+                        )?;
+                        continue;
+                    }
+                }
+            }
+        };
 
-    // for (sku, (shopify_price, shopify_id)) in shopify_products {
-    //     let abc_product = match abc_products.get(&sku) {
-    //         Some(p) => p,
-    //         None => {
-    //             fixer::log(
-    //                 log_to_stdout,
-    //                 fixer::Log::NotFound,
-    //                 format!("NOT FOUND Item {} Shopify: {} cents", sku, shopify_price),
-    //             )?;
-    //             continue;
-    //         }
-    //     };
+        fixer::log(
+            log_to_stdout,
+            fixer::Log::Adjusted,
+            format!(
+                "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents, {} stock",
+                &shopify_product.sku,
+                &abc_product.list(),
+                &shopify_product.price,
+                &abc_product.stock(),
+            ),
+        )?;
 
-    //     fixer::log(
-    //         log_to_stdout,
-    //         fixer::Log::Adjusted,
-    //         format!(
-    //             "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents, {} stock",
-    //             sku,
-    //             &abc_product.list(),
-    //             shopify_price,
-    //             &abc_product.stock(),
-    //         ),
-    //     )?;
+        // Dry run means that no prices should actually be changed, so skip the update step
+        if cli.dry_run {
+            continue;
+        }
 
-    //     // Dry run means that no prices should actually be changed, so skip the update step
-    //     if cli.dry_run {
-    //         continue;
-    //     }
-
-    //     match update_shopify_listing(
-    //         &config,
-    //         shopify_id,
-    //         abc_product.list().to_owned().max(shopify_price as i64),
-    //         abc_product.stock(),
-    //     )
-    //     .await
-    //     {
-    //         Ok(r) => {
-    //             println!("{}", r);
-    //         }
-    //         Err(e) => fixer::log(
-    //             log_to_stdout,
-    //             fixer::Log::Error,
-    //             format!("ERROR updating product with id {}: {:?}", shopify_id, e),
-    //         )?,
-    //     };
-
-    // match (shopify_price as i64).cmp(&abc_product.list()) {
-    //     cmp::Ordering::Less => {
-    //         fixer::log(
-    //             log_to_stdout,
-    //             fixer::Log::Adjusted,
-    //             format!(
-    //                 "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-    //                 sku,
-    //                 &abc_product.list(),
-    //                 shopify_price
-    //             ),
-    //         )?;
-
-    //         // Dry run means that no prices should actually be changed, so skip the update step
-    //         if cli.dry_run {
-    //             continue;
-    //         }
-
-    //         match update_shopify_listing(
-    //             &config,
-    //             shopify_id,
-    //             abc_product.list().to_owned(),
-    //             abc_product.stock(),
-    //         )
-    //         .await
-    //         {
-    //             Ok(_) => (),
-    //             Err(e) => fixer::log(
-    //                 log_to_stdout,
-    //                 fixer::Log::Error,
-    //                 format!("ERROR updating product with id {}: {:?}", shopify_id, e),
-    //             )?,
-    //         };
-    //     }
-    //     cmp::Ordering::Greater => {
-    //         fixer::log(
-    //             log_to_stdout,
-    //             fixer::Log::Greater,
-    //             format!(
-    //                 "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-    //                 sku,
-    //                 &abc_product.list(),
-    //                 shopify_price
-    //             ),
-    //         )?;
-    //     }
-    //     cmp::Ordering::Equal => {
-    //         fixer::log(
-    //             log_to_stdout,
-    //             fixer::Log::Equal,
-    //             format!(
-    //                 "NOT ADJUSTING Item {} ABC: {} cents, Shopify: {} cents",
-    //                 sku,
-    //                 &abc_product.list(),
-    //                 shopify_price
-    //             ),
-    //         )?;
-    //     }
-    // }
-    // }
+        if &shopify_product.sku != &abc_product.sku()
+            || &shopify_product.price != &abc_product.list()
+        {
+            match update_shopify_listing(&config, &shopify_product, &abc_product).await {
+                Ok(_) => {
+                    fixer::log(
+                        log_to_stdout,
+                        fixer::Log::Adjusted,
+                        format!(
+                            "ADJUSTING Shopify {} {} cents, ABC {} {} cents",
+                            &shopify_product.sku,
+                            &shopify_product.price,
+                            &abc_product.sku(),
+                            &abc_product.list(),
+                        ),
+                    )?;
+                }
+                Err(e) => fixer::log(
+                    log_to_stdout,
+                    fixer::Log::Error,
+                    format!(
+                        "ERROR updating product with id {}: {:?}",
+                        &shopify_product.id, e
+                    ),
+                )?,
+            }
+        }
+    }
 
     Ok(())
 }

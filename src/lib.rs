@@ -240,6 +240,9 @@ pub enum Log {
 
     /// Shows which SKUs exist in Shopify but were not found in ABC. "./not_found.txt"
     NotFound,
+
+    /// A list of different ABC products that have the same UPC
+    DuplicateAbcUpcs,
 }
 
 /// Handles logging info to the proper file or stdout as specified.
@@ -290,6 +293,7 @@ where
         Log::Error => log_path_parent.join("logs/error.txt"),
         Log::Greater => log_path_parent.join("logs/not_adjusted_greater.txt"),
         Log::NotFound => log_path_parent.join("logs/not_found.txt"),
+        Log::DuplicateAbcUpcs => log_path_parent.join("logs/duplicate_abc_upcs.txt"),
     };
 
     if !log_path_parent.join("logs").exists() {
