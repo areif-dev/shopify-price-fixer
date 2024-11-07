@@ -27,7 +27,7 @@ pub struct Edge {
     pub node: Node,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Node {
     pub id: String,
@@ -39,10 +39,11 @@ pub struct Node {
     pub product: Product,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Product {
     pub id: String,
+    pub status: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -78,6 +79,7 @@ pub struct ShopifyProduct {
     pub barcode: Option<Upc>,
     pub available_for_sale: bool,
     pub product_id: String,
+    pub is_active: bool,
 }
 
 impl TryFrom<Node> for ShopifyProduct {
@@ -92,10 +94,13 @@ impl TryFrom<Node> for ShopifyProduct {
             "Could not parse float from {} for Node with id {}",
             &value.price, &value.id
         ))))?;
-        let sku = &value.sku.ok_or(FixerError::Custom(format!(
-            "Missing SKU for Node with id {}",
-            &value.id,
-        )))?;
+        let sku = &value
+            .sku
+            .ok_or(FixerError::Custom(format!(
+                "Missing SKU for Node with id {}",
+                &value.id,
+            )))?
+            .to_uppercase();
         Ok(Self {
             id: value.id,
             sku: sku.to_owned(),
@@ -104,22 +109,25 @@ impl TryFrom<Node> for ShopifyProduct {
             barcode,
             available_for_sale: value.available_for_sale,
             product_id: value.product.id,
+            is_active: value.product.status == "ACTIVE",
         })
     }
 }
 
-pub async fn fetch_shopify_products(config: &Config) -> Result<Vec<ShopifyProduct>, FixerError> {
+pub async fn fetch_shopify_products(
+    config: &Config,
+) -> Result<(Vec<ShopifyProduct>, Vec<Node>), FixerError> {
     let (client, headers) =
         create_client_with_headers(config, "application/json").or(Err(FixerError::Custom(
             "Encountered InvalidHeaderValue when building client to fetch shopify products"
                 .to_string(),
         )))?;
+    let mut failed_nodes = Vec::new();
     let mut products = Vec::new();
     let mut has_next_page = true;
     let mut cursor = None;
 
     while has_next_page {
-        // Define the GraphQL query with an optional cursor for pagination.
         let query = serde_json::json!({
             "query": format!(
                 r#"
@@ -135,6 +143,7 @@ pub async fn fetch_shopify_products(config: &Config) -> Result<Vec<ShopifyProduc
                                 availableForSale
                                 product {{
                                     id 
+                                    status
                                 }}
                             }}
                         }}
@@ -167,11 +176,14 @@ pub async fn fetch_shopify_products(config: &Config) -> Result<Vec<ShopifyProduc
         cursor = Some(graphql.data.product_variants.page_info.end_cursor);
 
         for edge in graphql.data.product_variants.edges {
-            products.push(ShopifyProduct::try_from(edge.node)?);
+            match ShopifyProduct::try_from(edge.node.clone()) {
+                Ok(p) => products.push(p),
+                Err(_) => failed_nodes.push(edge.node),
+            }
         }
     }
 
-    Ok(products)
+    Ok((products, failed_nodes))
 }
 
 fn price_from_str(price_str: &str) -> Result<i64, ParseFloatError> {
@@ -284,25 +296,24 @@ pub fn parse_abc_item_files(
             )))?
             .clone();
         existing_record.stock = stock;
+        existing_record.sku = existing_record.sku.to_uppercase();
         products.insert(sku, existing_record);
     }
     Ok(products)
 }
 
-pub fn map_upcs(
-    existing_map: &HashMap<String, AbcProduct>,
-) -> (HashMap<String, AbcProduct>, Vec<Upc>) {
+pub fn map_upcs(existing_map: &HashMap<String, AbcProduct>) -> HashMap<String, (bool, AbcProduct)> {
     let mut upc_map = HashMap::new();
-    let mut duplicates = Vec::new();
     for (_sku, product) in existing_map {
         for upc in product.upcs.iter() {
-            let old = upc_map.insert(upc.to_string(), product.to_owned());
-            if let Some(_) = old {
-                duplicates.push(upc.to_owned());
-            }
+            let dup = match upc_map.get(&upc.to_string()) {
+                Some(_) => true,
+                None => false,
+            };
+            upc_map.insert(upc.to_string(), (dup, product.to_owned()));
         }
     }
-    (upc_map, duplicates)
+    upc_map
 }
 
 #[derive(Debug, Clone)]

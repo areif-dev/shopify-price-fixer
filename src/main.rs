@@ -66,29 +66,30 @@ async fn update_shopify_listing(
     let new_price = abc_product.list().max(shopify_product.price);
     let query = serde_json::json!({
         "query": r#"
-            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {{
-              productVariantsBulkUpdate(productId: $productId, variants: $variants) {{
-                product {{
-                  id
-                }}
-                productVariants {{
-                  id
-                  sku 
-                  price 
-                }}
-                userErrors {{
-                  field
-                  message
-                }}
-              }}
-            }}
-    "#,
+            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) { 
+                productVariantsBulkUpdate(productId: $productId, variants: $variants) { 
+                    product { 
+                        id 
+                    } 
+                    productVariants { 
+                        id 
+                        sku 
+                        price 
+                    } 
+                    userErrors {
+                        field 
+                        message 
+                    } 
+                }
+            }"#,
         "variables": {
             "productId": shopify_product.product_id,
             "variants": [
               {
                 "id": shopify_product.id,
-                "sku": abc_product.sku(),
+                "inventoryItem": {
+                    "sku": abc_product.sku(),
+                },
                 "price": format!("{:0.2}", (new_price as f64) / 100.0)
               }
             ]
@@ -101,7 +102,7 @@ async fn update_shopify_listing(
     );
 
     let res = client
-        .put(url)
+        .post(url)
         .headers(headers)
         .body(query.to_string())
         .send()
@@ -159,17 +160,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(e)?;
         }
     };
-    let (upc_map, duplicates) = map_upcs(&abc_products);
-    for dup in duplicates {
-        fixer::log(
-            log_to_stdout,
-            fixer::Log::DuplicateAbcUpcs,
-            format!("DUPLICATE UPC {}", dup.to_string()),
-        )?;
+    let upc_map = map_upcs(&abc_products);
+    let (shopify_products, failed_nodes) = fixer::product::fetch_shopify_products(&config).await?;
+    for node in failed_nodes {
+        match ShopifyProduct::try_from(node) {
+            Ok(_) => continue,
+            Err(e) => fixer::log(
+                log_to_stdout,
+                fixer::Log::Error,
+                format!("FAILED NODE because of {}", e),
+            )?,
+        }
     }
-    let shopify_products = fixer::product::fetch_shopify_products(&config).await?;
 
     for shopify_product in shopify_products {
+        if !&shopify_product.is_active {
+            continue;
+        }
+
         let abc_product = match abc_products.get(&shopify_product.sku) {
             Some(p) => p,
             None => {
@@ -178,15 +186,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     None => "".to_string(),
                 };
                 match upc_map.get(&barcode) {
-                    Some(p) => p,
+                    Some((dup, product)) => {
+                        if *dup {
+                            fixer::log(
+                                log_to_stdout,
+                                fixer::Log::DuplicateAbcUpcs,
+                                format!("DUPLICATE UPC {:?}", &shopify_product),
+                            )?;
+                            continue;
+                        } else {
+                            product
+                        }
+                    }
                     None => {
                         fixer::log(
                             log_to_stdout,
                             fixer::Log::NotFound,
-                            format!(
-                                "NOT FOUND Item {} Shopify: {} cents",
-                                &shopify_product.sku, &shopify_product.price
-                            ),
+                            format!("NOT FOUND {:?}", &shopify_product),
                         )?;
                         continue;
                     }
@@ -194,16 +210,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
+        if &shopify_product.sku.to_uppercase() == &abc_product.sku().to_uppercase() {
+            if &shopify_product.price == &abc_product.list() {
+                fixer::log(
+                    log_to_stdout,
+                    fixer::Log::Equal,
+                    format!(
+                        "NOT ADJUSTING EQUAL {:?}, {:?}",
+                        &shopify_product, &abc_product
+                    ),
+                )?;
+                continue;
+            } else if &shopify_product.price > &abc_product.list() {
+                fixer::log(
+                    log_to_stdout,
+                    fixer::Log::Greater,
+                    format!(
+                        "NOT ADJUSTING GREATER {:?}, {:?}",
+                        &shopify_product, &abc_product
+                    ),
+                )?;
+                continue;
+            }
+        }
+
         fixer::log(
             log_to_stdout,
             fixer::Log::Adjusted,
-            format!(
-                "ADJUSTING Item {} ABC: {} cents, Shopify: {} cents, {} stock",
-                &shopify_product.sku,
-                &abc_product.list(),
-                &shopify_product.price,
-                &abc_product.stock(),
-            ),
+            format!("ADJUSTING {:?}, {:?}", &shopify_product, &abc_product),
         )?;
 
         // Dry run means that no prices should actually be changed, so skip the update step
@@ -211,32 +245,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        if &shopify_product.sku != &abc_product.sku()
-            || &shopify_product.price != &abc_product.list()
-        {
-            match update_shopify_listing(&config, &shopify_product, &abc_product).await {
-                Ok(_) => {
-                    fixer::log(
-                        log_to_stdout,
-                        fixer::Log::Adjusted,
-                        format!(
-                            "ADJUSTING Shopify {} {} cents, ABC {} {} cents",
-                            &shopify_product.sku,
-                            &shopify_product.price,
-                            &abc_product.sku(),
-                            &abc_product.list(),
-                        ),
-                    )?;
-                }
-                Err(e) => fixer::log(
-                    log_to_stdout,
-                    fixer::Log::Error,
-                    format!(
-                        "ERROR updating product with id {}: {:?}",
-                        &shopify_product.id, e
-                    ),
-                )?,
-            }
+        match update_shopify_listing(&config, &shopify_product, &abc_product).await {
+            Ok(m) => println!("{}", m),
+            Err(e) => fixer::log(
+                log_to_stdout,
+                fixer::Log::Error,
+                format!(
+                    "ERROR updating product with id {:?}: {:?}",
+                    &shopify_product, e
+                ),
+            )?,
         }
     }
 
