@@ -33,7 +33,7 @@ jobs:
 
       - name: Install Build Deps
         run: |
-          apt update && \
+          apt update -y && \
           apt install -y pkg-config openssl
 
       - name: Setup Rust 
