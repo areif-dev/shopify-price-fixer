@@ -30,6 +30,11 @@ jobs:
       - name: Run Unit Tests 
         run: cargo test --verbose 
 
+      - name: Install Build Deps
+        run: |
+          apt update && \
+          apt install -y pkg-config openssl
+
       - name: Setup Rust 
         uses: actions-rs/toolchain@v1 
         with: 
