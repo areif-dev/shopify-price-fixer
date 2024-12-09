@@ -53,4 +53,4 @@ jobs:
           prerelease: false
           make_latest: true
           files: |
-            ./target/${{ matrix.arch }}-${{ matrix.target }}/release/shopify-price-fixer{,.exe}
+            ./target/${{ matrix.arch }}-${{ matrix.target }}/release/shopify-price-fixer{{,.exe}}
