@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::{cmp, fs};
 
 use clap::Parser;
-use shopify_price_fixer::product::{map_upcs, AbcProduct, ShopifyProduct};
+use shopify_price_fixer::product::{
+    map_upcs, AbcProduct, ShopifyProduct, UpdateShopifyPriceResponse,
+};
 use shopify_price_fixer::{self as fixer, product, FixerError};
 
 use reqwest::header::HeaderMap;
@@ -53,11 +55,11 @@ fn create_client_with_headers(
 /// # Errors
 ///
 /// Thread will panic if sending the request fails or if fetching the response fails
-async fn update_shopify_listing(
+async fn update_shopify_price(
     config: &fixer::Config,
     shopify_product: &ShopifyProduct,
     abc_product: &AbcProduct,
-) -> Result<String, FixerError> {
+) -> Result<UpdateShopifyPriceResponse, FixerError> {
     let (client, headers) = create_client_with_headers(config, "application/json".to_string()).or(
         Err(FixerError::Custom(
             "Found InvalidHeaderValue when updating shopify product".to_string(),
@@ -70,6 +72,7 @@ async fn update_shopify_listing(
                 productVariantsBulkUpdate(productId: $productId, variants: $variants) { 
                     product { 
                         id 
+                        status 
                     } 
                     productVariants { 
                         id 
@@ -81,7 +84,7 @@ async fn update_shopify_listing(
                         message 
                     } 
                 }
-            }"#,
+            };"#,
         "variables": {
             "productId": shopify_product.product_id,
             "variants": [
@@ -92,7 +95,7 @@ async fn update_shopify_listing(
                 },
                 "price": format!("{:0.2}", (new_price as f64) / 100.0)
               }
-            ]
+            ],
         }
     });
 
@@ -109,8 +112,102 @@ async fn update_shopify_listing(
         .await?
         .text()
         .await?;
+    Ok(serde_json::from_str(&res)?)
+}
 
-    Ok(res)
+async fn update_shopify_inventory(
+    config: &fixer::Config,
+    shopify_product: &ShopifyProduct,
+    abc_product: &AbcProduct,
+) -> Result<(), FixerError> {
+    let (client, headers) = create_client_with_headers(config, "application/json".to_string()).or(
+        Err(FixerError::Custom(
+            "Found InvalidHeaderValue when updating shopify inventory".to_string(),
+        )),
+    )?;
+    let tracked_query = serde_json::json!({
+        "query": r#"
+            mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
+                inventoryItemUpdate(id: $id, input: $input) {
+                    inventoryItem {
+                        id 
+                        tracked 
+                        unitCost {
+                            amount
+                        }
+                    }
+                    userErrors {
+                        message
+                    }
+                }
+            }
+        "#,
+        "variables": {
+            "id": shopify_product.inventory_item_id,
+            "input": {
+                "tracked": true,
+                "cost": abc_product.cost() as f64 / 100.0
+            }
+        }
+    });
+    let query = serde_json::json!({
+        "query": r#"
+            mutation InventorySet($input: InventorySetQuantitiesInput!) {
+                inventorySetQuantities(input: $input) {
+                    inventoryAdjustmentGroup {
+                        createdAt
+                        changes {
+                            item {
+                                sku 
+                            }
+                            quantityAfterChange
+                        }
+                        reason
+                    }
+                    userErrors {
+                        message
+                    }
+                }
+            }"#,
+        "variables": {
+            "input": {
+                "ignoreCompareQuantity": true,
+                "name": "on_hand",
+                "reason": "correction",
+                "quantities": [{
+                    "inventoryItemId": shopify_product.inventory_item_id,
+                    "locationId": "gid://shopify/Location/5535957028",
+                    "quantity": if abc_product.stock() > 0.0 { abc_product.stock() as i64 } else { 0 },
+                }]
+            },
+        }
+    });
+
+    let url = format!(
+        "https://{}/admin/api/{}/graphql.json",
+        config.business_url, config.api_version
+    );
+
+    let tracked_res = client
+        .post(url.clone())
+        .headers(headers.clone())
+        .body(tracked_query.to_string())
+        .send()
+        .await?
+        .text()
+        .await?;
+    println!("{}", tracked_res);
+
+    let res = client
+        .post(url)
+        .headers(headers)
+        .body(query.to_string())
+        .send()
+        .await?
+        .text()
+        .await?;
+    println!("{}", res);
+    Ok(())
 }
 
 #[tokio::main]
@@ -210,6 +307,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
+        let mut skip_price = false;
+        let mut skip_inventory = false;
         if &shopify_product.sku.to_uppercase() == &abc_product.sku().to_uppercase() {
             if &shopify_product.price == &abc_product.list() {
                 fixer::log(
@@ -220,7 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &shopify_product, &abc_product
                     ),
                 )?;
-                continue;
+                skip_price = true;
             } else if &shopify_product.price > &abc_product.list() {
                 fixer::log(
                     log_to_stdout,
@@ -230,7 +329,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &shopify_product, &abc_product
                     ),
                 )?;
-                continue;
+                skip_price = true;
+            }
+            if shopify_product.stock == abc_product.stock() as i64 {
+                skip_inventory = true;
             }
         }
 
@@ -245,16 +347,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        match update_shopify_listing(&config, &shopify_product, &abc_product).await {
-            Ok(m) => println!("{}", m),
-            Err(e) => fixer::log(
-                log_to_stdout,
-                fixer::Log::Error,
-                format!(
-                    "ERROR updating product with id {:?}: {:?}",
-                    &shopify_product, e
-                ),
-            )?,
+        if !skip_inventory {
+            if let Err(e) = update_shopify_inventory(&config, &shopify_product, &abc_product).await
+            {
+                fixer::log(
+                    log_to_stdout,
+                    fixer::Log::Error,
+                    format!(
+                        "ERROR updating inventory for product with id {:?}: {:?}",
+                        &shopify_product, e
+                    ),
+                )?;
+            }
+        }
+
+        if !skip_price {
+            match update_shopify_price(&config, &shopify_product, &abc_product).await {
+                Ok(m) => {
+                    println!("{:?}", m);
+                }
+
+                Err(e) => fixer::log(
+                    log_to_stdout,
+                    fixer::Log::Error,
+                    format!(
+                        "ERROR updating product with id {:?}: {:?}",
+                        &shopify_product, e
+                    ),
+                )?,
+            }
         }
     }
 

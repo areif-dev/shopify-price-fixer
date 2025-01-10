@@ -4,7 +4,34 @@ use std::{collections::HashMap, num::ParseFloatError};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct Response {
+pub struct UpdateShopifyPriceResponse {
+    pub data: UpdateShopifyPriceData,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateShopifyPriceData {
+    pub product_variants_bulk_update: ProductVariantsBulkUpdate,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductVariantsBulkUpdate {
+    pub product: Product,
+    pub product_variants: Vec<UpdateShopifyPriceProductVariant>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateShopifyPriceProductVariant {
+    pub id: String,
+    pub sku: String,
+    pub price: String,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchShopifyProductsResponse {
     pub data: Data,
 }
 
@@ -36,7 +63,28 @@ pub struct Node {
     pub price: String,
     pub barcode: Option<String>,
     pub available_for_sale: bool,
+    pub inventory_item: InventoryItem,
     pub product: Product,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryItem {
+    pub id: String,
+    pub tracked: bool,
+    pub inventory_level: InventoryLevel,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryLevel {
+    pub quantities: Vec<Quantity>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Quantity {
+    pub quantity: i64,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -78,6 +126,8 @@ pub struct ShopifyProduct {
     pub price: i64,
     pub barcode: Option<Upc>,
     pub available_for_sale: bool,
+    pub inventory_item_id: String,
+    pub stock: i64,
     pub product_id: String,
     pub is_active: bool,
 }
@@ -101,6 +151,16 @@ impl TryFrom<Node> for ShopifyProduct {
                 &value.id,
             )))?
             .to_uppercase();
+        let stock = &value
+            .inventory_item
+            .inventory_level
+            .quantities
+            .get(0)
+            .ok_or(FixerError::Custom(format!(
+                "Missing inventory on_hand for Node with id {}",
+                &value.id
+            )))?
+            .quantity;
         Ok(Self {
             id: value.id,
             sku: sku.to_owned(),
@@ -109,6 +169,8 @@ impl TryFrom<Node> for ShopifyProduct {
             barcode,
             available_for_sale: value.available_for_sale,
             product_id: value.product.id,
+            inventory_item_id: value.inventory_item.id,
+            stock: stock.to_owned(),
             is_active: value.product.status == "ACTIVE",
         })
     }
@@ -141,6 +203,15 @@ pub async fn fetch_shopify_products(
                                 price
                                 barcode
                                 availableForSale
+                                inventoryItem {{
+                                    id
+                                    tracked 
+                                    inventoryLevel(locationId: "gid://shopify/Location/5535957028") {{
+                                        quantities(names: ["on_hand"]) {{
+                                            quantity
+                                        }}
+                                    }}
+                                }}
                                 product {{
                                     id 
                                     status
@@ -171,7 +242,7 @@ pub async fn fetch_shopify_products(
             .await?;
 
         let text = response.text().await?;
-        let graphql: Response = serde_json::from_str(&text)?;
+        let graphql: FetchShopifyProductsResponse = serde_json::from_str(&text)?;
         has_next_page = graphql.data.product_variants.page_info.has_next_page;
         cursor = Some(graphql.data.product_variants.page_info.end_cursor);
 
