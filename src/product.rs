@@ -1,6 +1,6 @@
 use crate::{create_client_with_headers, upc::Upc, Config, FixerError};
-use serde::{ser::Error, Deserialize};
-use std::{collections::HashMap, num::ParseFloatError};
+use serde::{ser::Error, Deserialize, Serialize};
+use std::{collections::HashMap, fs::File, num::ParseFloatError};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -387,6 +387,47 @@ pub fn map_upcs(existing_map: &HashMap<String, AbcProduct>) -> HashMap<String, (
     upc_map
 }
 
+pub fn abc_products_to_nmr_csv(products: &[AbcProduct]) -> Result<(), FixerError> {
+    let file = File::create("nmr.csv").map_err(|e| {
+        FixerError::Custom(format!("Failed to create nmr.csv file because of {:?}", e))
+    })?;
+    let mut wtr = csv::Writer::from_writer(file);
+    wtr.write_record(&["name", "upc", "price", "qty"])
+        .map_err(|e| {
+            FixerError::Custom(format!(
+                "Could not write headers to nmr.csv because of {:?}",
+                e
+            ))
+        })?;
+    for product in products {
+        let nmr_product = match NmrProduct::try_from(product.clone()) {
+            Ok(p) => p,
+            Err(_) => {
+                continue;
+            }
+        };
+        wtr.write_record(&[
+            nmr_product.name,
+            nmr_product.upc,
+            nmr_product.price,
+            nmr_product.qty,
+        ])
+        .map_err(|e| {
+            FixerError::Custom(format!(
+                "Failed to write a record to nmr.csv because of {:?}",
+                e
+            ))
+        })?;
+    }
+    wtr.flush().map_err(|e| {
+        FixerError::Custom(format!(
+            "Failed to flush csv writer to nmr.csv because of {:?}",
+            e
+        ))
+    })?;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct AbcProduct {
     sku: String,
@@ -500,6 +541,37 @@ impl AbcProductBuilder {
             list: self.list?,
             cost: self.cost?,
             stock: self.stock?,
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct NmrProduct {
+    name: String,
+    upc: String,
+    price: String,
+    qty: String,
+}
+
+impl TryFrom<AbcProduct> for NmrProduct {
+    type Error = FixerError;
+    fn try_from(value: AbcProduct) -> Result<Self, Self::Error> {
+        let upc = value
+            .upcs()
+            .get(0)
+            .ok_or(FixerError::Custom(format!("Missing upc for {:?}", value)))?
+            .to_string();
+        let qty = value.stock() as i64;
+        let qty = if qty >= 0 {
+            qty.to_string()
+        } else {
+            "0".to_string()
+        };
+        Ok(NmrProduct {
+            name: value.desc(),
+            upc,
+            price: ((value.list() as f32) / 100.0).to_string(),
+            qty,
         })
     }
 }
