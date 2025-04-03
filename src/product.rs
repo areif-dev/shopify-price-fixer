@@ -561,14 +561,22 @@ impl TryFrom<AbcProduct> for NmrProduct {
             .get(0)
             .ok_or(FixerError::Custom(format!("Missing upc for {:?}", value)))?
             .to_string();
+        if upc == "000000000000" {
+            return Err(FixerError::Custom(format!("Missing upc for {:?}", value)))?;
+        }
         let qty = value.stock() as i64;
         let qty = if qty >= 0 {
             qty.to_string()
         } else {
             "0".to_string()
         };
+        let name = if value.desc().len() > 0 {
+            value.desc()
+        } else {
+            return Err(FixerError::Custom(format!("Missing desc for {:?}", value)))?;
+        };
         Ok(NmrProduct {
-            name: value.desc(),
+            name,
             upc,
             price: ((value.list() as f32) / 100.0).to_string(),
             qty,
