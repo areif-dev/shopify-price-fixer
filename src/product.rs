@@ -1,6 +1,6 @@
 use crate::{create_client_with_headers, upc::Upc, Config, FixerError};
 use serde::{ser::Error, Deserialize, Serialize};
-use std::{collections::HashMap, fs::File, num::ParseFloatError};
+use std::{collections::HashMap, fs::File, num::ParseFloatError, str::Chars};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -428,6 +428,44 @@ pub fn abc_products_to_nmr_csv(products: &[AbcProduct]) -> Result<(), FixerError
     Ok(())
 }
 
+/// Convert \' and \" chars into ft and in. abbreviations, respectively
+///
+/// # Arguments
+///
+/// * `raw` - The raw string to fix abbreviations on
+///
+/// # Returns
+///
+/// The `raw` string with all \' and \" characters swapped for ft. and in. abbreviations
+fn quotes_to_distance(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut i = 0;
+    let mut res = String::with_capacity(chars.len());
+    while i < chars.len() - 1 {
+        match (chars[i], chars[i + 1]) {
+            ('\'', '\'') => {
+                res.push_str("ft.");
+                i += 2;
+                continue;
+            }
+            ('\"', '\"') => {
+                res.push_str("in.");
+                i += 2;
+                continue;
+            }
+            ('\'', _) => {
+                res.push_str("ft.");
+            }
+            ('\"', _) => {
+                res.push_str("in.");
+            }
+            _ => res.push(chars[i]),
+        }
+        i += 1;
+    }
+    res
+}
+
 #[derive(Debug, Clone)]
 pub struct AbcProduct {
     sku: String,
@@ -571,7 +609,10 @@ impl TryFrom<AbcProduct> for NmrProduct {
             "0".to_string()
         };
         let name = if value.desc().len() > 0 {
-            value.desc()
+            quotes_to_distance(&value.desc())
+                .chars()
+                .filter(|c| *c != '\\')
+                .collect()
         } else {
             return Err(FixerError::Custom(format!("Missing desc for {:?}", value)))?;
         };
