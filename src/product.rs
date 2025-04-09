@@ -611,7 +611,7 @@ impl TryFrom<AbcProduct> for NmrProduct {
         let name = if value.desc().len() > 0 {
             quotes_to_distance(&value.desc())
                 .chars()
-                .filter(|c| *c != '\\')
+                .filter(|c| *c != '\\' && *c != ',')
                 .collect()
         } else {
             return Err(FixerError::Custom(format!("Missing desc for {:?}", value)))?;
