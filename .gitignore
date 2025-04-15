@@ -4,3 +4,7 @@ config.json
 target/
 TabOutput.tsv
 *.txt*
+*.data 
+*.csv
+*.exe
+logs
