@@ -1,5 +1,5 @@
+use std::fs;
 use std::path::PathBuf;
-use std::{cmp, fs};
 
 use clap::Parser;
 use shopify_price_fixer::product::{
@@ -257,129 +257,132 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(e)?;
         }
     };
-    let abc_products: Vec<AbcProduct> = abc_products.values().map(|v| v.to_owned()).collect();
-    abc_products_to_nmr_csv(abc_products.as_slice()).unwrap();
-    // let upc_map = map_upcs(&abc_products);
-    // let (shopify_products, failed_nodes) = fixer::product::fetch_shopify_products(&config).await?;
-    // for node in failed_nodes {
-    //     match ShopifyProduct::try_from(node) {
-    //         Ok(_) => continue,
-    //         Err(e) => fixer::log(
-    //             log_to_stdout,
-    //             fixer::Log::Error,
-    //             format!("FAILED NODE because of {}", e),
-    //         )?,
-    //     }
-    // }
+    let upc_map = map_upcs(&abc_products);
+    let (shopify_products, failed_nodes) = fixer::product::fetch_shopify_products(&config).await?;
+    for node in failed_nodes {
+        match ShopifyProduct::try_from(node) {
+            Ok(_) => continue,
+            Err(e) => fixer::log(
+                log_to_stdout,
+                fixer::Log::Error,
+                format!("FAILED NODE because of {}", e),
+            )?,
+        }
+    }
 
-    // for shopify_product in shopify_products {
-    //     if !&shopify_product.is_active {
-    //         continue;
-    //     }
+    let mut nmr_abc_products = Vec::new();
+    for shopify_product in shopify_products {
+        if !&shopify_product.is_active {
+            continue;
+        }
 
-    //     let abc_product = match abc_products.get(&shopify_product.sku) {
-    //         Some(p) => p,
-    //         None => {
-    //             let barcode = match &shopify_product.barcode {
-    //                 Some(u) => u.to_string(),
-    //                 None => "".to_string(),
-    //             };
-    //             match upc_map.get(&barcode) {
-    //                 Some((dup, product)) => {
-    //                     if *dup {
-    //                         fixer::log(
-    //                             log_to_stdout,
-    //                             fixer::Log::DuplicateAbcUpcs,
-    //                             format!("DUPLICATE UPC {:?}", &shopify_product),
-    //                         )?;
-    //                         continue;
-    //                     } else {
-    //                         product
-    //                     }
-    //                 }
-    //                 None => {
-    //                     fixer::log(
-    //                         log_to_stdout,
-    //                         fixer::Log::NotFound,
-    //                         format!("NOT FOUND {:?}", &shopify_product),
-    //                     )?;
-    //                     continue;
-    //                 }
-    //             }
-    //         }
-    //     };
+        nmr_abc_products.push(
+            match abc_products.get(&shopify_product.sku) {
+                Some(p) => p,
+                None => {
+                    let barcode = match &shopify_product.barcode {
+                        Some(u) => u.to_string(),
+                        None => "".to_string(),
+                    };
+                    match upc_map.get(&barcode) {
+                        Some((dup, product)) => {
+                            if *dup {
+                                fixer::log(
+                                    log_to_stdout,
+                                    fixer::Log::DuplicateAbcUpcs,
+                                    format!("DUPLICATE UPC {:?}", &shopify_product),
+                                )?;
+                                continue;
+                            } else {
+                                product
+                            }
+                        }
+                        None => {
+                            fixer::log(
+                                log_to_stdout,
+                                fixer::Log::NotFound,
+                                format!("NOT FOUND {:?}", &shopify_product),
+                            )?;
+                            continue;
+                        }
+                    }
+                }
+            }
+            .to_owned(),
+        );
+        abc_products_to_nmr_csv(nmr_abc_products.as_slice()).unwrap();
 
-    //     let mut skip_price = false;
-    //     let mut skip_inventory = false;
-    //     if &shopify_product.sku.to_uppercase() == &abc_product.sku().to_uppercase() {
-    //         if &shopify_product.price == &abc_product.list() {
-    //             fixer::log(
-    //                 log_to_stdout,
-    //                 fixer::Log::Equal,
-    //                 format!(
-    //                     "NOT ADJUSTING EQUAL {:?}, {:?}",
-    //                     &shopify_product, &abc_product
-    //                 ),
-    //             )?;
-    //             skip_price = true;
-    //         } else if &shopify_product.price > &abc_product.list() {
-    //             fixer::log(
-    //                 log_to_stdout,
-    //                 fixer::Log::Greater,
-    //                 format!(
-    //                     "NOT ADJUSTING GREATER {:?}, {:?}",
-    //                     &shopify_product, &abc_product
-    //                 ),
-    //             )?;
-    //             skip_price = true;
-    //         }
-    //         if shopify_product.stock == abc_product.stock() as i64 {
-    //             skip_inventory = true;
-    //         }
-    //     }
+        //     let mut skip_price = false;
+        //     let mut skip_inventory = false;
+        //     if &shopify_product.sku.to_uppercase() == &abc_product.sku().to_uppercase() {
+        //         if &shopify_product.price == &abc_product.list() {
+        //             fixer::log(
+        //                 log_to_stdout,
+        //                 fixer::Log::Equal,
+        //                 format!(
+        //                     "NOT ADJUSTING EQUAL {:?}, {:?}",
+        //                     &shopify_product, &abc_product
+        //                 ),
+        //             )?;
+        //             skip_price = true;
+        //         } else if &shopify_product.price > &abc_product.list() {
+        //             fixer::log(
+        //                 log_to_stdout,
+        //                 fixer::Log::Greater,
+        //                 format!(
+        //                     "NOT ADJUSTING GREATER {:?}, {:?}",
+        //                     &shopify_product, &abc_product
+        //                 ),
+        //             )?;
+        //             skip_price = true;
+        //         }
+        //         if shopify_product.stock == abc_product.stock() as i64 {
+        //             skip_inventory = true;
+        //         }
+        //     }
 
-    //     fixer::log(
-    //         log_to_stdout,
-    //         fixer::Log::Adjusted,
-    //         format!("ADJUSTING {:?}, {:?}", &shopify_product, &abc_product),
-    //     )?;
+        //     fixer::log(
+        //         log_to_stdout,
+        //         fixer::Log::Adjusted,
+        //         format!("ADJUSTING {:?}, {:?}", &shopify_product, &abc_product),
+        //     )?;
 
-    //     // Dry run means that no prices should actually be changed, so skip the update step
-    //     if cli.dry_run {
-    //         continue;
-    //     }
+        //     // Dry run means that no prices should actually be changed, so skip the update step
+        //     if cli.dry_run {
+        //         continue;
+        //     }
 
-    //     if !skip_inventory {
-    //         if let Err(e) = update_shopify_inventory(&config, &shopify_product, &abc_product).await
-    //         {
-    //             fixer::log(
-    //                 log_to_stdout,
-    //                 fixer::Log::Error,
-    //                 format!(
-    //                     "ERROR updating inventory for product with id {:?}: {:?}",
-    //                     &shopify_product, e
-    //                 ),
-    //             )?;
-    //         }
-    //     }
+        //     if !skip_inventory {
+        //         if let Err(e) = update_shopify_inventory(&config, &shopify_product, &abc_product).await
+        //         {
+        //             fixer::log(
+        //                 log_to_stdout,
+        //                 fixer::Log::Error,
+        //                 format!(
+        //                     "ERROR updating inventory for product with id {:?}: {:?}",
+        //                     &shopify_product, e
+        //                 ),
+        //             )?;
+        //         }
+        //     }
 
-    //     if !skip_price {
-    //         match update_shopify_price(&config, &shopify_product, &abc_product).await {
-    //             Ok(m) => {
-    //                 println!("{:?}", m);
-    //             }
+        //     if !skip_price {
+        //         match update_shopify_price(&config, &shopify_product, &abc_product).await {
+        //             Ok(m) => {
+        //                 println!("{:?}", m);
+        //             }
 
-    //             Err(e) => fixer::log(
-    //                 log_to_stdout,
-    //                 fixer::Log::Error,
-    //                 format!(
-    //                     "ERROR updating product with id {:?}: {:?}",
-    //                     &shopify_product, e
-    //                 ),
-    //             )?,
-    //         }
-    //     }
-    // }
+        //             Err(e) => fixer::log(
+        //                 log_to_stdout,
+        //                 fixer::Log::Error,
+        //                 format!(
+        //                     "ERROR updating product with id {:?}: {:?}",
+        //                     &shopify_product, e
+        //                 ),
+        //             )?,
+        //         }
+        //     }
+    }
 
     Ok(())
 }

@@ -1,6 +1,7 @@
 use crate::{create_client_with_headers, upc::Upc, Config, FixerError};
+use chrono::Datelike;
 use serde::{ser::Error, Deserialize, Serialize};
-use std::{collections::HashMap, fs::File, num::ParseFloatError, str::Chars};
+use std::{collections::HashMap, fs::File, num::ParseFloatError};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -333,6 +334,7 @@ pub fn parse_abc_item_files(
                 list,
                 cost,
                 stock: 0.0,
+                last_sold: None,
             },
         );
     }
@@ -359,6 +361,14 @@ pub fn parse_abc_item_files(
             "Cannot parse f64 from stock_str in row {} of posted items",
             i
         ))))?;
+        let last_sold_str: String = row
+            .get(1)
+            .ok_or(csv::Error::custom(format!(
+                "Cannot deserialize last_sold in row {} of posted items",
+                i
+            )))?
+            .to_string();
+        let last_sold = chrono::NaiveDate::parse_from_str(&last_sold_str, "%Y-%m-%d").ok();
         let mut existing_record = products
             .get(&sku)
             .ok_or(csv::Error::custom(format!(
@@ -368,6 +378,7 @@ pub fn parse_abc_item_files(
             .clone();
         existing_record.stock = stock;
         existing_record.sku = existing_record.sku.to_uppercase();
+        existing_record.last_sold = last_sold;
         products.insert(sku, existing_record);
     }
     Ok(products)
@@ -400,6 +411,18 @@ pub fn abc_products_to_nmr_csv(products: &[AbcProduct]) -> Result<(), FixerError
             ))
         })?;
     for product in products {
+        let now = chrono::Local::now().date_naive();
+        let five_years_ago = now.with_year((now.year_ce().1 - 5) as i32).unwrap();
+
+        // Skip any product that either has never sold or has not sold for over 5 years
+        match product.last_sold() {
+            None => continue,
+            Some(d) => {
+                if d < five_years_ago {
+                    continue;
+                }
+            }
+        }
         let nmr_product = match NmrProduct::try_from(product.clone()) {
             Ok(p) => p,
             Err(_) => {
@@ -474,6 +497,7 @@ pub struct AbcProduct {
     list: i64,
     cost: i64,
     stock: f64,
+    last_sold: Option<chrono::NaiveDate>,
 }
 
 impl AbcProduct {
@@ -500,6 +524,10 @@ impl AbcProduct {
     pub fn stock(&self) -> f64 {
         self.stock
     }
+
+    pub fn last_sold(&self) -> Option<chrono::NaiveDate> {
+        self.last_sold
+    }
 }
 
 pub struct AbcProductBuilder {
@@ -509,6 +537,7 @@ pub struct AbcProductBuilder {
     list: Option<i64>,
     cost: Option<i64>,
     stock: Option<f64>,
+    last_sold: Option<chrono::NaiveDate>,
 }
 
 impl AbcProductBuilder {
@@ -520,6 +549,7 @@ impl AbcProductBuilder {
             list: None,
             cost: None,
             stock: None,
+            last_sold: None,
         }
     }
 
@@ -579,6 +609,7 @@ impl AbcProductBuilder {
             list: self.list?,
             cost: self.cost?,
             stock: self.stock?,
+            last_sold: self.last_sold,
         })
     }
 }
