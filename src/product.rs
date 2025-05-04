@@ -1,262 +1,8 @@
-use crate::{create_client_with_headers, upc::Upc, Config, FixerError};
+use crate::{upc::Upc, FixerError};
 use chrono::Datelike;
-use serde::{ser::Error, Deserialize, Serialize};
+use ean13::Ean13;
+use serde::{ser::Error, Serialize};
 use std::{collections::HashMap, fs::File, num::ParseFloatError};
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateShopifyPriceResponse {
-    pub data: UpdateShopifyPriceData,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateShopifyPriceData {
-    pub product_variants_bulk_update: ProductVariantsBulkUpdate,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ProductVariantsBulkUpdate {
-    pub product: Product,
-    pub product_variants: Vec<UpdateShopifyPriceProductVariant>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateShopifyPriceProductVariant {
-    pub id: String,
-    pub sku: String,
-    pub price: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct FetchShopifyProductsResponse {
-    pub data: Data,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Data {
-    pub product_variants: ProductVariants,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ProductVariants {
-    pub edges: Vec<Edge>,
-    pub page_info: PageInfo,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Edge {
-    pub node: Node,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Node {
-    pub id: String,
-    pub sku: Option<String>,
-    pub display_name: String,
-    pub price: String,
-    pub barcode: Option<String>,
-    pub available_for_sale: bool,
-    pub inventory_item: InventoryItem,
-    pub product: Product,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct InventoryItem {
-    pub id: String,
-    pub tracked: bool,
-    pub inventory_level: InventoryLevel,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct InventoryLevel {
-    pub quantities: Vec<Quantity>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Quantity {
-    pub quantity: i64,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Product {
-    pub id: String,
-    pub status: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct PageInfo {
-    pub has_next_page: bool,
-    pub end_cursor: String,
-    pub start_cursor: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Cost {
-    pub requested_query_cost: u32,
-    pub actual_query_cost: u32,
-    pub throttle_status: ThrottleStatus,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ThrottleStatus {
-    pub maximum_available: u32,
-    pub currently_available: u32,
-    pub restore_rate: u32,
-}
-
-#[derive(Debug)]
-pub struct ShopifyProduct {
-    pub id: String,
-    pub sku: String,
-    pub display_name: String,
-    pub price: i64,
-    pub barcode: Option<Upc>,
-    pub available_for_sale: bool,
-    pub inventory_item_id: String,
-    pub stock: i64,
-    pub product_id: String,
-    pub is_active: bool,
-}
-
-impl TryFrom<Node> for ShopifyProduct {
-    type Error = FixerError;
-
-    fn try_from(value: Node) -> Result<Self, Self::Error> {
-        let barcode = match value.barcode {
-            Some(b) => Upc::try_from(b).ok(),
-            None => None,
-        };
-        let price = price_from_str(&value.price).or(Err(FixerError::Custom(format!(
-            "Could not parse float from {} for Node with id {}",
-            &value.price, &value.id
-        ))))?;
-        let sku = &value
-            .sku
-            .ok_or(FixerError::Custom(format!(
-                "Missing SKU for Node with id {}",
-                &value.id,
-            )))?
-            .to_uppercase();
-        let stock = &value
-            .inventory_item
-            .inventory_level
-            .quantities
-            .get(0)
-            .ok_or(FixerError::Custom(format!(
-                "Missing inventory on_hand for Node with id {}",
-                &value.id
-            )))?
-            .quantity;
-        Ok(Self {
-            id: value.id,
-            sku: sku.to_owned(),
-            display_name: value.display_name,
-            price,
-            barcode,
-            available_for_sale: value.available_for_sale,
-            product_id: value.product.id,
-            inventory_item_id: value.inventory_item.id,
-            stock: stock.to_owned(),
-            is_active: value.product.status == "ACTIVE",
-        })
-    }
-}
-
-pub async fn fetch_shopify_products(
-    config: &Config,
-) -> Result<(Vec<ShopifyProduct>, Vec<Node>), FixerError> {
-    let (client, headers) =
-        create_client_with_headers(config, "application/json").or(Err(FixerError::Custom(
-            "Encountered InvalidHeaderValue when building client to fetch shopify products"
-                .to_string(),
-        )))?;
-    let mut failed_nodes = Vec::new();
-    let mut products = Vec::new();
-    let mut has_next_page = true;
-    let mut cursor = None;
-
-    while has_next_page {
-        let query = serde_json::json!({
-            "query": format!(
-                r#"
-                {{
-                    productVariants(first: 250{}) {{
-                        edges {{
-                            node {{
-                                id
-                                sku
-                                displayName
-                                price
-                                barcode
-                                availableForSale
-                                inventoryItem {{
-                                    id
-                                    tracked 
-                                    inventoryLevel(locationId: "gid://shopify/Location/5535957028") {{
-                                        quantities(names: ["on_hand"]) {{
-                                            quantity
-                                        }}
-                                    }}
-                                }}
-                                product {{
-                                    id 
-                                    status
-                                }}
-                            }}
-                        }}
-                        pageInfo {{
-                            hasNextPage
-                            endCursor
-                            startCursor
-                        }}
-                    }}
-                }}"#,
-                cursor.map_or("".to_string(), |c| format!(" after: \"{}\"", c))
-            )
-        });
-
-        let url = format!(
-            "https://{}/admin/api/2024-10/graphql.json",
-            config.business_url
-        );
-
-        let response = client
-            .post(&url)
-            .headers(headers.to_owned())
-            .body(query.to_string())
-            .send()
-            .await?;
-
-        let text = response.text().await?;
-        let graphql: FetchShopifyProductsResponse = serde_json::from_str(&text)?;
-        has_next_page = graphql.data.product_variants.page_info.has_next_page;
-        cursor = Some(graphql.data.product_variants.page_info.end_cursor);
-
-        for edge in graphql.data.product_variants.edges {
-            match ShopifyProduct::try_from(edge.node.clone()) {
-                Ok(p) => products.push(p),
-                Err(_) => failed_nodes.push(edge.node),
-            }
-        }
-    }
-
-    Ok((products, failed_nodes))
-}
 
 fn price_from_str(price_str: &str) -> Result<i64, ParseFloatError> {
     let price_str: String = price_str
@@ -493,7 +239,7 @@ fn quotes_to_distance(raw: &str) -> String {
 pub struct AbcProduct {
     sku: String,
     desc: String,
-    upcs: Vec<Upc>,
+    upcs: Vec<Ean13>,
     list: i64,
     cost: i64,
     stock: f64,
@@ -533,7 +279,7 @@ impl AbcProduct {
 pub struct AbcProductBuilder {
     sku: Option<String>,
     desc: Option<String>,
-    upcs: Vec<Upc>,
+    upcs: Vec<Ean13>,
     list: Option<i64>,
     cost: Option<i64>,
     stock: Option<f64>,
@@ -617,7 +363,7 @@ impl AbcProductBuilder {
 #[derive(Debug, Serialize)]
 pub struct NmrProduct {
     name: String,
-    upc: String,
+    upc: Ean13,
     price: String,
     qty: String,
 }

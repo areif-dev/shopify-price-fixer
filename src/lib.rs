@@ -1,9 +1,6 @@
-use reqwest::header::{HeaderMap, InvalidHeaderValue, USER_AGENT};
-use std::collections::HashMap;
-use std::error::Error;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub mod product;
 pub mod upc;
@@ -34,36 +31,6 @@ impl From<serde_json::Error> for FixerError {
 }
 
 impl std::error::Error for FixerError {}
-
-/// Initialize a reqwest client and its HeaderMap for sending HTTP requests
-///
-/// # Arguments
-///
-/// * `content-type` - The MIME type of the data being sent in the request. The price fixer only
-/// uses "application/json" and "application/graphql", but any valid contenty type should work
-///
-/// # Returns
-///
-/// If successful, return a tuple containing (reqwest::Client, reqwest::header::HeaderMap)
-///
-/// # Errors
-///
-/// * The thread will panic if the config file does not exist or is missing information
-/// * Will return Err(reqwest::header::InvalidHeaderValue) if `content-type` is an invalid MIME
-/// type or if the API_ACCESS_TOKEN cannot be parsed
-fn create_client_with_headers(
-    config: &Config,
-    content_type: &str,
-) -> Result<(reqwest::Client, HeaderMap), InvalidHeaderValue> {
-    let access_token = &config.shopify_access_token;
-
-    let client = reqwest::Client::new();
-    let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", content_type.parse()?);
-    headers.insert("X-Shopify-Access-Token", access_token.parse()?);
-
-    Ok((client, headers))
-}
 
 /// Interfaces with the Shopify REST API to keep prices up to date with the proprietary ABC
 /// accounting software. This program will only change a Shopify price if the price in ABC is
@@ -96,6 +63,9 @@ pub struct Cli {
     /// Optional. Path to the config.json file. If left blank, assume ./config.json
     #[arg(short, long, default_value = "./config.json")]
     pub config: PathBuf,
+
+    #[arg(short, long = "existing")]
+    pub existing_products: PathBuf,
 
     /// Set this to execute the program normally, except that no prices will actually be changed in
     /// Shopify. Useful for debugging
@@ -146,79 +116,6 @@ impl Config {
 
         Ok(config)
     }
-}
-
-/// Fetches all Shopify products and returns a `HashMap` of SKU to tuple (price in cents, variant ID).
-///
-/// # Arguments
-///
-/// * `config` - A reference to the `Config` struct containing Shopify configuration details.
-///
-/// # Returns
-///
-/// * `Result<HashMap<String, (u32, u64)>, Box<dyn Error>>` - A mapping of SKU to tuple (price in
-/// cents, variant ID) if successful, error otherwise
-///
-/// # Errors
-///
-/// Returns an error if it fails to communicate with the Shopify API or parse the response.
-pub async fn all_shopify_products(
-    config: &Config,
-) -> Result<HashMap<String, (u32, u64)>, Box<dyn Error>> {
-    let mut page = 0;
-    let mut products: HashMap<String, (u32, u64)> = HashMap::new();
-    let client = reqwest::Client::new();
-    loop {
-        let response = client
-            .get(format!(
-                "https://{}/products.json?limit=250&page={}",
-                config.storefront_url, page
-            ))
-            .header(USER_AGENT, "curl/8.2.1") // Shopify blocks the default `reqwest` user agent
-            .send()
-            .await?;
-
-        let response_text = response.text().await?;
-
-        let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
-        let products_json = match response_json["products"].as_array() {
-            Some(p) => p,
-            None => break,
-        };
-
-        if products_json.len() == 0 {
-            break;
-        }
-
-        for product in products_json {
-            let variants = match product["variants"].as_array() {
-                Some(v) => v,
-                None => continue,
-            };
-
-            for variant in variants {
-                let sku = match variant["sku"].as_str() {
-                    Some(s) => s.to_uppercase(),
-                    None => continue,
-                };
-                let id = match variant["id"].as_u64() {
-                    Some(i) => i,
-                    None => continue,
-                };
-                let price_str = match variant["price"].as_str() {
-                    Some(p) => p,
-                    None => continue,
-                };
-
-                let price_f32: f32 = price_str.parse()?;
-                let price_u32: u32 = (price_f32 * 100.0) as u32;
-                products.insert(sku, (price_u32, id));
-            }
-        }
-        page += 1;
-    }
-
-    Ok(products)
 }
 
 /// List of supported types of logs
