@@ -24,20 +24,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let log_to_stdout = !cli.write_logs;
-    let config = match shopify_price_fixer::Config::read_config(&cli.config) {
-        Ok(c) => c,
-        Err(e) => {
-            fixer::log(
-                log_to_stdout,
-                fixer::Log::Error,
-                format!(
-                    "Encountered {} while trying to read config file at {:?}",
-                    e, &cli.config
-                ),
-            )?;
-            return Err(e)?;
-        }
-    };
     let abc_products = match product::parse_abc_item_files(&item_data_path, &posted_data_path) {
         Ok(p) => p,
         Err(e) => {

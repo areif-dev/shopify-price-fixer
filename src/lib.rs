@@ -3,7 +3,6 @@ use std::io::Write;
 use std::path::PathBuf;
 
 pub mod product;
-pub mod upc;
 
 #[derive(Debug)]
 pub enum FixerError {
@@ -60,62 +59,8 @@ pub struct Cli {
     )]
     pub posted_data: String,
 
-    /// Optional. Path to the config.json file. If left blank, assume ./config.json
-    #[arg(short, long, default_value = "./config.json")]
-    pub config: PathBuf,
-
-    #[arg(short, long = "existing")]
+    #[arg(short, long = "existing", default_value = "existing.csv")]
     pub existing_products: PathBuf,
-
-    /// Set this to execute the program normally, except that no prices will actually be changed in
-    /// Shopify. Useful for debugging
-    #[arg(short, long = "dry")]
-    pub dry_run: bool,
-}
-
-/// Stores configuration details to run the app. Inlcuding the api key and domain to send queries
-/// to
-#[derive(Debug, serde::Deserialize)]
-pub struct Config {
-    /// API key for the Shopify admin API
-    pub shopify_access_token: String,
-
-    /// The admin subdomain for the business. Like "my-business.myshopify.com". Leave off scheme.
-    pub business_url: String,
-
-    /// The publicly facing domain for the storefront. Like "mybusiness.com". Leave off scheme.
-    pub storefront_url: String,
-
-    /// The version of the admin api to use. Such as "2022-07"
-    pub api_version: String,
-}
-
-impl Config {
-    /// Reads the configuration from the "config.json" file and returns a `Result`.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The path the the config file
-    ///
-    /// # Returns
-    ///
-    /// * `Result<Self, String>` - Configuration details if successful, `String` error otherwise.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error string if it fails to read or parse the configuration file.
-    pub fn read_config(path: &PathBuf) -> Result<Self, String> {
-        let config_str = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => return Err("Could not read config file".to_string()),
-        };
-        let config: Config = match serde_json::from_str(&config_str) {
-            Ok(c) => c,
-            Err(_) => return Err("Failed to parse config file. Must define business_url, storefront_url, shopify_access_token, and api_version".to_string()),
-        };
-
-        Ok(config)
-    }
 }
 
 /// List of supported types of logs

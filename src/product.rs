@@ -1,4 +1,4 @@
-use crate::{upc::Upc, FixerError};
+use crate::FixerError;
 use chrono::Datelike;
 use ean13::Ean13;
 use serde::{ser::Error, Serialize};
