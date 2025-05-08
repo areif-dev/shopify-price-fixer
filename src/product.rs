@@ -50,9 +50,20 @@ pub fn parse_abc_item_files(
             "Cannot fetch upcs in row {}",
             i
         )))?;
-        let upcs: Vec<Upc> = Upc::from_abc_upc_list(upc_str)
-            .iter()
-            .filter_map(|upc| upc.to_owned())
+        let upcs: Vec<Ean13> = upc_str
+            .split(",")
+            .filter_map(|s| {
+                if s.len() == 11 {
+                    // Some ABC UPCs leave out the check digit, so make one up and let [`Ean13::from_str_nonstrict`] fix it
+                    Ean13::from_str_nonstrict(&format!("{}0", s)).ok()
+                } else if s.len() < 11 {
+                    // Anything less than 11 characters long is probably a dead upc
+                    None
+                } else {
+                    // Anything 12 characters and up has a chance of being a good upc
+                    Ean13::from_str_nonstrict(s).ok()
+                }
+            })
             .collect();
         let list = row.get(6).ok_or(csv::Error::custom(format!(
             "Cannot fetch list price from row {}",
@@ -130,21 +141,24 @@ pub fn parse_abc_item_files(
     Ok(products)
 }
 
-pub fn map_upcs(existing_map: &HashMap<String, AbcProduct>) -> HashMap<String, (bool, AbcProduct)> {
+pub fn map_upcs(existing_map: &HashMap<String, AbcProduct>) -> HashMap<Ean13, (bool, AbcProduct)> {
     let mut upc_map = HashMap::new();
     for (_sku, product) in existing_map {
         for upc in product.upcs.iter() {
-            let dup = match upc_map.get(&upc.to_string()) {
+            let dup = match upc_map.get(upc) {
                 Some(_) => true,
                 None => false,
             };
-            upc_map.insert(upc.to_string(), (dup, product.to_owned()));
+            upc_map.insert(upc.clone(), (dup, product.to_owned()));
         }
     }
     upc_map
 }
 
-pub fn abc_products_to_nmr_csv(products: &[AbcProduct]) -> Result<(), FixerError> {
+pub fn abc_products_to_nmr_csv<I>(products: I) -> Result<(), FixerError>
+where
+    I: Iterator<Item = AbcProduct>,
+{
     let file = File::create("nmr.csv").map_err(|e| {
         FixerError::Custom(format!("Failed to create nmr.csv file because of {:?}", e))
     })?;
@@ -177,7 +191,7 @@ pub fn abc_products_to_nmr_csv(products: &[AbcProduct]) -> Result<(), FixerError
         };
         wtr.write_record(&[
             nmr_product.name,
-            nmr_product.upc,
+            nmr_product.upc.to_string(),
             nmr_product.price,
             nmr_product.qty,
         ])
@@ -255,7 +269,7 @@ impl AbcProduct {
         self.desc.clone()
     }
 
-    pub fn upcs(&self) -> Vec<Upc> {
+    pub fn upcs(&self) -> Vec<Ean13> {
         self.upcs.to_vec()
     }
 
@@ -313,11 +327,11 @@ impl AbcProductBuilder {
         }
     }
 
-    pub fn with_upcs(self, upcs: Vec<Upc>) -> Self {
+    pub fn with_upcs(self, upcs: Vec<Ean13>) -> Self {
         AbcProductBuilder { upcs, ..self }
     }
 
-    pub fn add_upc(self, upc: Upc) -> Self {
+    pub fn add_upc(self, upc: Ean13) -> Self {
         let mut new_upcs = self.upcs.to_vec();
         new_upcs.push(upc);
         AbcProductBuilder {
@@ -375,10 +389,7 @@ impl TryFrom<AbcProduct> for NmrProduct {
             .upcs()
             .get(0)
             .ok_or(FixerError::Custom(format!("Missing upc for {:?}", value)))?
-            .to_string();
-        if upc == "000000000000" {
-            return Err(FixerError::Custom(format!("Missing upc for {:?}", value)))?;
-        }
+            .clone();
         let qty = value.stock() as i64;
         let qty = if qty >= 0 {
             qty.to_string()
