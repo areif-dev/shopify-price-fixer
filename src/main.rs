@@ -50,21 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => (),
     }
 
-    let log_to_stdout = !cli.write_logs;
-    let abc_products = match product::parse_abc_item_files(&item_data_path, &posted_data_path) {
-        Ok(p) => p,
-        Err(e) => {
-            fixer::log(
-                log_to_stdout,
-                fixer::Log::Error,
-                format!(
-                    "Failed to parse abc products from data files with error: {}",
-                    e
-                ),
-            )?;
-            return Err(e)?;
-        }
-    };
+    let abc_products = product::parse_abc_item_files(&item_data_path, &posted_data_path)?;
     let upc_map = map_upcs(&abc_products);
     let rdr = std::fs::File::open(existing_csv)?;
     let previously_uploaded_upcs = fetch_existing_upcs(rdr)?;
