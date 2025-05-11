@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -9,9 +10,6 @@ use shopify_price_fixer::{self as fixer, product};
 
 #[derive(Debug, Deserialize)]
 struct CsvRecord {
-    price: Option<String>,
-    name: Option<String>,
-    qty: Option<String>,
     upc: Ean13,
 }
 
@@ -55,23 +53,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rdr = std::fs::File::open(existing_csv)?;
     let previously_uploaded_upcs = fetch_existing_upcs(rdr)?;
 
-    let acceptable_products = previously_uploaded_upcs
-        .iter()
-        .filter_map(|ean| upc_map.get(&ean))
-        .filter_map(|(dup, product)| {
-            if *dup {
-                fixer::log(
-                    log_to_stdout,
-                    fixer::Log::DuplicateAbcUpcs,
-                    format!("DUPLICATE UPC {:?}", &product),
-                )
-                .unwrap();
-                None
-            } else {
-                Some(product.clone())
+    let mut missing_upcs = Vec::new();
+    let mut acceptable_products = Vec::new();
+    for ean in previously_uploaded_upcs {
+        let (dups, product) = match upc_map.get(&ean) {
+            Some(p) => p,
+            None => {
+                missing_upcs.push(ean.clone());
+                eprintln!("MISSING UPC: {:?}", ean);
+                continue;
             }
-        });
-    abc_products_to_nmr_csv(acceptable_products).unwrap();
+        };
+
+        // Many "duplicate" upcs will exist for the exact same ABC inventory listing because the
+        // UPC will be entered both with and without a check digit. This block removes those false
+        // duplicates
+        let dup_skus: HashSet<String> = dups.iter().map(|dup| dup.sku()).collect();
+        if dup_skus.len() > 1 {
+            eprintln!("DUPLICATE UPC: {:?}", dups);
+            missing_upcs.push(ean);
+            continue;
+        }
+        acceptable_products.push(product.clone());
+    }
+
+    abc_products_to_nmr_csv(acceptable_products.into_iter()).unwrap();
 
     Ok(())
 }

@@ -46,10 +46,15 @@ pub fn parse_abc_item_files(
                 i
             )))?
             .to_string();
-        let upc_str = row.get(43).ok_or(csv::Error::custom(format!(
-            "Cannot fetch upcs in row {}",
-            i
-        )))?;
+        let upc_str: String = row
+            .get(43)
+            .ok_or(csv::Error::custom(format!(
+                "Cannot fetch upcs in row {}",
+                i
+            )))?
+            .chars()
+            .filter(|c| c.is_digit(10) || *c == ',')
+            .collect();
         let upcs: Vec<Ean13> = upc_str
             .split(",")
             .filter_map(|s| {
@@ -141,15 +146,21 @@ pub fn parse_abc_item_files(
     Ok(products)
 }
 
-pub fn map_upcs(existing_map: &HashMap<String, AbcProduct>) -> HashMap<Ean13, (bool, AbcProduct)> {
+pub type DuplicateProducts = Vec<AbcProduct>;
+
+pub fn map_upcs(
+    existing_map: &HashMap<String, AbcProduct>,
+) -> HashMap<Ean13, (DuplicateProducts, AbcProduct)> {
     let mut upc_map = HashMap::new();
     for (_sku, product) in existing_map {
         for upc in product.upcs.iter() {
-            let dup = match upc_map.get(upc) {
-                Some(_) => true,
-                None => false,
-            };
-            upc_map.insert(upc.clone(), (dup, product.to_owned()));
+            if let Some((dup, prod)) = upc_map.insert(upc.clone(), (Vec::new(), product.to_owned()))
+            {
+                let mut dup = dup;
+                dup.push(product.to_owned());
+                dup.push(prod.clone());
+                upc_map.insert(upc.clone(), (dup, prod));
+            }
         }
     }
     upc_map
