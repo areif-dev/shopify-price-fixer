@@ -4,28 +4,18 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use ean13::Ean13;
-use serde::Deserialize;
 use shopify_price_fixer::product::{abc_products_to_nmr_csv, map_upcs};
 use shopify_price_fixer::{self as fixer, product};
 
-#[derive(Debug, Deserialize)]
-struct CsvRecord {
-    upc: Ean13,
-}
-
-fn fetch_existing_upcs<R>(rdr: R) -> Result<Vec<Ean13>, csv::Error>
-where
-    R: std::io::Read,
-{
-    let mut rdr = csv::ReaderBuilder::new()
-        .has_headers(true)
-        .delimiter(b',')
-        .from_reader(rdr);
+fn fetch_existing_upcs(file: &PathBuf) -> Result<Vec<Ean13>, std::io::Error> {
+    let text = fs::read_to_string(file)?;
+    let existing_set: HashSet<&str> = text.lines().collect();
     let mut existing = Vec::new();
-    for result in rdr.deserialize() {
-        let record: CsvRecord = result?;
-        existing.push(record.upc);
+    for elem in existing_set {
+        let trimmed = elem.trim();
+        existing.push(Ean13::from_str(trimmed).map_err(|e| std::io::Error::other(e))?);
     }
+
     Ok(existing)
 }
 
@@ -34,7 +24,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = fixer::Cli::parse();
     let item_data_path = cli.item_data;
     let posted_data_path = cli.posted_data;
-    let existing_csv = cli.existing_products;
 
     // Something is probably very wrong if the binary has no parent directory, but if it doesn't,
     // switch everything to use the current working directory to be safe(r)
@@ -50,8 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let abc_products = product::parse_abc_item_files(&item_data_path, &posted_data_path)?;
     let upc_map = map_upcs(&abc_products);
-    let rdr = std::fs::File::open(existing_csv)?;
-    let previously_uploaded_upcs = fetch_existing_upcs(rdr)?;
+    let previously_uploaded_upcs = fetch_existing_upcs(&cli.existing_upcs)?;
 
     let mut missing_upcs = Vec::new();
     let mut acceptable_products = Vec::new();
@@ -77,7 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         acceptable_products.push(product.clone());
     }
 
-    abc_products_to_nmr_csv(acceptable_products.into_iter()).unwrap();
+    let written_products = abc_products_to_nmr_csv(acceptable_products.into_iter())?
+        .iter()
+        .map(|p| p.upc.to_string())
+        .collect::<Vec<String>>()
+        .join("\n");
+    fs::write("existing.txt", written_products.as_bytes())?;
 
     Ok(())
 }

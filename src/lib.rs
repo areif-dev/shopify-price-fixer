@@ -53,6 +53,6 @@ pub struct Cli {
     )]
     pub posted_data: String,
 
-    #[arg(short, long = "existing", default_value = "existing.csv")]
-    pub existing_products: PathBuf,
+    #[arg(short, long = "existing", default_value = "existing.txt")]
+    pub existing_upcs: PathBuf,
 }
