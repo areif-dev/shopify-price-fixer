@@ -166,7 +166,7 @@ pub fn map_upcs(
     upc_map
 }
 
-pub fn abc_products_to_nmr_csv<I>(products: I) -> Result<(), FixerError>
+pub fn abc_products_to_nmr_csv<I>(products: I) -> Result<Vec<NmrProduct>, FixerError>
 where
     I: Iterator<Item = AbcProduct>,
 {
@@ -181,6 +181,7 @@ where
                 e
             ))
         })?;
+    let mut nmr_products = Vec::new();
     for product in products {
         let now = chrono::Local::now().date_naive();
         let five_years_ago = now.with_year((now.year_ce().1 - 5) as i32).unwrap();
@@ -201,10 +202,10 @@ where
             }
         };
         wtr.write_record(&[
-            nmr_product.name,
-            nmr_product.upc.to_string(),
-            nmr_product.price,
-            nmr_product.qty,
+            &nmr_product.name,
+            &nmr_product.upc.to_string(),
+            &nmr_product.price,
+            &nmr_product.qty,
         ])
         .map_err(|e| {
             FixerError::Custom(format!(
@@ -212,6 +213,7 @@ where
                 e
             ))
         })?;
+        nmr_products.push(nmr_product);
     }
     wtr.flush().map_err(|e| {
         FixerError::Custom(format!(
@@ -219,7 +221,7 @@ where
             e
         ))
     })?;
-    Ok(())
+    Ok(nmr_products)
 }
 
 /// Convert \' and \" chars into ft and in. abbreviations, respectively
@@ -388,7 +390,7 @@ impl AbcProductBuilder {
 #[derive(Debug, Serialize)]
 pub struct NmrProduct {
     name: String,
-    upc: Ean13,
+    pub upc: Ean13,
     price: String,
     qty: String,
 }
