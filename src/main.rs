@@ -13,7 +13,7 @@ fn fetch_existing_upcs(file: &PathBuf) -> Result<Vec<Ean13>, std::io::Error> {
     let mut existing = Vec::new();
     for elem in existing_set {
         let trimmed = elem.trim();
-        existing.push(Ean13::from_str(trimmed).map_err(|e| std::io::Error::other(e))?);
+        existing.push(Ean13::new(trimmed).map_err(|e| std::io::Error::other(e))?);
     }
 
     Ok(existing)

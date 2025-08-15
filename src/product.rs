@@ -221,6 +221,17 @@ where
             e
         ))
     })?;
+
+    // Uploading an empty file to Catalyst will result in the whole catalog being removed, so
+    // remove the whole data file in that case
+    if nmr_products.is_empty() {
+        std::fs::remove_file("nmr.csv").map_err(|e| {
+            FixerError::Custom(format!(
+                "nmr_products is empty, but the data file could not be deleted due to `{}`",
+                e
+            ))
+        })?;
+    }
     Ok(nmr_products)
 }
 
