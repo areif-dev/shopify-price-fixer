@@ -174,7 +174,7 @@ where
         FixerError::Custom(format!("Failed to create nmr.csv file because of {:?}", e))
     })?;
     let mut wtr = csv::Writer::from_writer(file);
-    wtr.write_record(&["name", "upc", "price", "qty"])
+    wtr.write_record(&["name", "upc", "price", "qty", "sku", "weight"])
         .map_err(|e| {
             FixerError::Custom(format!(
                 "Could not write headers to nmr.csv because of {:?}",
@@ -404,6 +404,8 @@ pub struct NmrProduct {
     pub upc: Ean13,
     price: String,
     qty: String,
+    sku: String,
+    weight: usize,
 }
 
 impl TryFrom<AbcProduct> for NmrProduct {
