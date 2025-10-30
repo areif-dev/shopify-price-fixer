@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let written_products = abc_products_to_nmr_csv(acceptable_products.into_iter())?
         .iter()
-        .map(|p| p.upc.to_string())
+        .map(|p| p.sku.clone())
         .collect::<Vec<String>>()
         .join("\n");
     fs::write("existing.txt", written_products.as_bytes())?;

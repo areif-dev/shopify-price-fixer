@@ -36,13 +36,6 @@ where
         FixerError::Custom(format!("Failed to create nmr.csv file because of {:?}", e))
     })?;
     let mut wtr = csv::Writer::from_writer(file);
-    wtr.write_record(&["name", "upc", "price", "qty", "sku", "weight"])
-        .map_err(|e| {
-            FixerError::Custom(format!(
-                "Could not write headers to nmr.csv because of {:?}",
-                e
-            ))
-        })?;
     let mut nmr_products = Vec::new();
     for product in products {
         let now = chrono::Local::now().date_naive();
@@ -59,20 +52,15 @@ where
         }
         let nmr_product = match NmrProduct::try_from(product.clone()) {
             Ok(p) => p,
-            Err(_) => {
+            Err(e) => {
+                eprintln!("{:?}", e);
                 continue;
             }
         };
-        wtr.write_record(&[
-            &nmr_product.name,
-            &nmr_product.upc.to_string(),
-            &nmr_product.price,
-            &nmr_product.qty,
-        ])
-        .map_err(|e| {
+        wtr.serialize(&nmr_product).map_err(|e| {
             FixerError::Custom(format!(
-                "Failed to write a record to nmr.csv because of {:?}",
-                e
+                "Failed to serialize {:?} due to '{}'",
+                &nmr_product, e
             ))
         })?;
         nmr_products.push(nmr_product);
@@ -138,21 +126,17 @@ fn quotes_to_distance(raw: &str) -> String {
 #[derive(Debug, Serialize)]
 pub struct NmrProduct {
     name: String,
-    pub upc: Ean13,
+    upc: Option<Ean13>,
     price: String,
     qty: String,
-    sku: String,
-    weight: usize,
+    pub sku: String,
+    weight: f64,
 }
 
 impl TryFrom<AbcProduct> for NmrProduct {
     type Error = FixerError;
     fn try_from(value: AbcProduct) -> Result<Self, Self::Error> {
-        let upc = value
-            .upcs()
-            .get(0)
-            .ok_or(FixerError::Custom(format!("Missing upc for {:?}", value)))?
-            .clone();
+        let upc = value.upcs().get(0).cloned();
         let qty = value.stock() as i64;
         let qty = if qty >= 0 {
             qty.to_string()
@@ -169,9 +153,14 @@ impl TryFrom<AbcProduct> for NmrProduct {
         };
         Ok(NmrProduct {
             name,
+            sku: value.sku(),
             upc,
-            price: ((value.list() as f32) / 100.0).to_string(),
+            price: (value.list() / Decimal::new(100, 0)).to_string(),
             qty,
+            weight: value.weight().ok_or(FixerError::Custom(format!(
+                "Missing weight for {:?}",
+                value
+            )))?,
         })
     }
 }
