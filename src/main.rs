@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
+use abc_product::AbcProduct;
 use clap::Parser;
 use ean13::Ean13;
 use shopify_price_fixer::product::{abc_products_to_nmr_csv, map_upcs};
@@ -30,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => (),
     }
 
-    let abc_products = product::parse_abc_item_files(&item_data_path, &posted_data_path)?;
+    let abc_products = AbcProduct::from_db_export(&item_data_path, &posted_data_path)?;
     let previously_uploaded_skus = fetch_existing_skus(&cli.existing_upcs)?;
 
     let mut missing_skus = Vec::new();
