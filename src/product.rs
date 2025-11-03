@@ -2,7 +2,6 @@ use crate::FixerError;
 use abc_product::AbcProduct;
 use chrono::Datelike;
 use ean13::Ean13;
-use rust_decimal::Decimal;
 use serde::Serialize;
 use std::{collections::HashMap, fs::File};
 
@@ -156,7 +155,7 @@ impl TryFrom<AbcProduct> for NmrProduct {
             name,
             sku: value.sku(),
             upc,
-            price: (value.list() / Decimal::new(100, 0)).to_string(),
+            price: value.list().to_string(),
             qty,
             weight: value.weight(),
         })

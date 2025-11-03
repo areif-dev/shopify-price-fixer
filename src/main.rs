@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(p) => p,
             None => {
                 missing_skus.push(sku.clone());
-                eprintln!("MISSING UPC: {:?}", sku);
+                eprintln!("MISSING SKU: {}", sku);
                 continue;
             }
         };
