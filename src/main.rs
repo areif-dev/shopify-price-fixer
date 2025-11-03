@@ -4,9 +4,8 @@ use std::path::PathBuf;
 
 use abc_product::AbcProduct;
 use clap::Parser;
-use ean13::Ean13;
-use shopify_price_fixer::product::{abc_products_to_nmr_csv, map_upcs};
-use shopify_price_fixer::{self as fixer, product};
+use shopify_price_fixer::product::abc_products_to_nmr_csv;
+use shopify_price_fixer::{self as fixer};
 
 fn fetch_existing_skus(file: &PathBuf) -> Result<HashSet<String>, std::io::Error> {
     let text = fs::read_to_string(file)?;
