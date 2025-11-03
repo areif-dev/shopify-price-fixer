@@ -130,7 +130,8 @@ pub struct NmrProduct {
     price: String,
     qty: String,
     pub sku: String,
-    weight: f64,
+    #[serde(skip_serializing)]
+    weight: Option<f64>,
 }
 
 impl TryFrom<AbcProduct> for NmrProduct {
@@ -157,10 +158,7 @@ impl TryFrom<AbcProduct> for NmrProduct {
             upc,
             price: (value.list() / Decimal::new(100, 0)).to_string(),
             qty,
-            weight: value.weight().ok_or(FixerError::Custom(format!(
-                "Missing weight for {:?}",
-                value
-            )))?,
+            weight: value.weight(),
         })
     }
 }
