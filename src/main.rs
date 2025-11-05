@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let abc_products = AbcProduct::from_db_export(&item_data_path, &posted_data_path)?;
-    let previously_uploaded_skus = fetch_existing_skus(&cli.existing_upcs)?;
+    let previously_uploaded_skus = fetch_existing_skus(&cli.existing_skus)?;
 
     let mut missing_skus = Vec::new();
     let mut acceptable_products = Vec::new();

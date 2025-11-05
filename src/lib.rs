@@ -53,8 +53,8 @@ pub struct Cli {
     )]
     pub posted_data: String,
 
-    /// The path to the file containing a new line separated list of UPCs to try pulling from the
+    /// The path to the file containing a new line separated list of SKUs to try pulling from the
     /// ABC data and uploading to Catalyst
     #[arg(short, long = "existing", default_value = "existing.txt")]
-    pub existing_upcs: PathBuf,
+    pub existing_skus: PathBuf,
 }
