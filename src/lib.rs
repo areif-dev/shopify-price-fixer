@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use serde::Deserialize;
+
 pub mod product;
 
 #[derive(Debug)]
@@ -28,6 +30,14 @@ impl From<serde_json::Error> for FixerError {
 }
 
 impl std::error::Error for FixerError {}
+
+#[derive(Debug, Deserialize)]
+pub struct Config {
+    pub shopify_access_token: String,
+    pub business_url: String,
+    pub storefront_url: String,
+    pub api_version: String,
+}
 
 /// Interfaces with the Shopify REST API to keep prices up to date with the proprietary ABC
 /// accounting software. This program will only change a Shopify price if the price in ABC is
