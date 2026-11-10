@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use abc_product::AbcProduct;
 use clap::Parser;
-use shopify_price_fixer::product::abc_products_to_nmr_csv;
 use shopify_price_fixer::{self as fixer};
 
 fn fetch_existing_skus(file: &PathBuf) -> Result<HashSet<String>, std::io::Error> {
@@ -31,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let abc_products = AbcProduct::from_db_export(&item_data_path, &posted_data_path)?;
-    let previously_uploaded_skus = fetch_existing_skus(&cli.existing_skus)?;
+    let previously_uploaded_skus = fetch_existing_skus(&cli.export_skus)?;
 
     let mut missing_skus = Vec::new();
     let mut acceptable_products = Vec::new();
@@ -47,11 +46,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         acceptable_products.push(product.clone());
     }
 
-    let written_products = abc_products_to_nmr_csv(acceptable_products.into_iter())?
-        .iter()
-        .map(|p| p.sku.clone())
-        .collect::<Vec<String>>()
-        .join("\n");
     fs::write("existing.txt", written_products.as_bytes())?;
 
     Ok(())

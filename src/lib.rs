@@ -1,8 +1,23 @@
 use std::path::PathBuf;
 
+use abc_product::AbcProduct;
+use clap::ValueEnum;
 use serde::Deserialize;
 
 pub mod product;
+pub mod shopify;
+
+pub trait UpdateListingTarget {
+    fn update(&self, products: &[AbcProduct]);
+}
+
+pub trait CreateListingTarget {
+    fn create(&self, products: &[AbcProduct]);
+}
+
+pub trait DeleteListingTarget {
+    fn delete(&self, products: &[AbcProduct]);
+}
 
 #[derive(Debug)]
 pub enum FixerError {
@@ -39,6 +54,12 @@ pub struct Config {
     pub api_version: String,
 }
 
+#[derive(Debug, Clone, ValueEnum)]
+#[non_exhaustive]
+pub enum ExportTargetOption {
+    Shopify,
+}
+
 /// Interfaces with the Shopify REST API to keep prices up to date with the proprietary ABC
 /// accounting software. This program will only change a Shopify price if the price in ABC is
 /// greater than what is currently in Shopify.
@@ -65,6 +86,10 @@ pub struct Cli {
 
     /// The path to the file containing a new line separated list of SKUs to try pulling from the
     /// ABC data and uploading to Catalyst
-    #[arg(short, long = "existing", default_value = "existing.txt")]
-    pub existing_skus: PathBuf,
+    #[arg(short, long, default_value = "export-skus.txt")]
+    pub export_skus: PathBuf,
+
+    /// Which provider to export ABC products to
+    #[arg(short, long, default_value = "Shopify")]
+    pub target: ExportTargetOption,
 }
