@@ -358,7 +358,7 @@ impl ShopifyController {
         &self,
         location_id: &str,
         products: &[AbcProduct],
-    ) -> Result<(), String> {
+    ) -> Result<Vec<AbcProduct>, String> {
         // https://shopify.dev/docs/api/admin-graphql/latest/mutations/inventorySetQuantities?language=graphql
         const SET_INVENTORY_QUERY: &str = r#"
             mutation inventorySetQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
@@ -395,7 +395,7 @@ impl ShopifyController {
                 .unwrap_or(product.sku())
                 .into();
             let Some((_, shopify_variant)) = self.products_by_barcode.get(&barcode) else {
-                no_matching_shopify_product.push(product);
+                no_matching_shopify_product.push(product.clone());
                 continue;
             };
             quantities.push(json!({
@@ -476,9 +476,10 @@ mod tests {
             .await
             .unwrap();
         let fix_products = [abc_products.get("99900008").unwrap().clone()];
-        controller
+        let no_matching_product = controller
             .update_inventory_quantities(&config.location_id, &fix_products)
             .await
             .unwrap();
+        assert!(no_matching_product.is_empty());
     }
 }
