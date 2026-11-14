@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         acceptable_products.push(product.clone());
     }
 
-    fs::write("existing.txt", written_products.as_bytes())?;
+    //fs::write("existing.txt", written_products.as_bytes())?;
 
     Ok(())
 }

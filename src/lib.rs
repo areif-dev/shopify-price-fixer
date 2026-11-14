@@ -2,10 +2,55 @@ use std::path::PathBuf;
 
 use abc_product::AbcProduct;
 use clap::ValueEnum;
-use serde::Deserialize;
+use gtin::Gtin;
+use serde::{Deserialize, Serialize};
 
 pub mod product;
 pub mod shopify;
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+pub enum BarcodeWrapper {
+    Gtin(Gtin),
+    String(String),
+}
+
+impl From<Gtin> for BarcodeWrapper {
+    fn from(value: Gtin) -> Self {
+        Self::Gtin(value)
+    }
+}
+
+impl From<String> for BarcodeWrapper {
+    fn from(value: String) -> Self {
+        if let Ok(g) = Gtin::new(&value) {
+            return BarcodeWrapper::Gtin(g);
+        }
+        BarcodeWrapper::String(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for BarcodeWrapper {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(BarcodeWrapper::from(s))
+    }
+}
+
+impl Serialize for BarcodeWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let string = match self {
+            Self::Gtin(g) => g.to_string(),
+            Self::String(s) => s.to_owned(),
+        };
+        serializer.serialize_str(&string)
+    }
+}
 
 pub trait UpdateListingTarget {
     fn update(&self, products: &[AbcProduct]);
@@ -52,6 +97,17 @@ pub struct Config {
     pub business_url: String,
     pub storefront_url: String,
     pub api_version: String,
+    pub location_id: String,
+}
+
+impl Config {
+    pub fn read() -> Result<Config, String> {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .open("./config.json")
+            .map_err(|e| format!("Missing config: {e:?}"))?;
+        serde_json::from_reader(file).map_err(|e| format!("Reading config file: {e:?}"))
+    }
 }
 
 #[derive(Debug, Clone, ValueEnum)]
