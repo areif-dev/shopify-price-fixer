@@ -421,21 +421,21 @@ impl ShopifyController {
             .map_err(|e| {
                 format!("Sending update_inventory_quantities request to shopify: {e:?}")
             })?;
-        let value: serde_json::Value = serde_json::from_str(
-            &response
-                .text()
-                .await
-                .map_err(|e| format!("Fetching shopify response text: {e:?}"))?,
-        )
-        .map_err(|e| format!("Parsing shopify response text: {e:?}"))?;
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| format!("Fetching shopify response text: {e:?}"))?;
+        let value: serde_json::Value = serde_json::from_str(&response_text).map_err(|e| {
+            format!("Parsing shopify response text: {e:?}. Response: {response_text}")
+        })?;
         let errors = value
             .pointer("/data/inventorySetQuantities/userErrors")
             .ok_or(format!(
-                "Shopify response missing userErrors section in update_inventory_quantities"
+                "Shopify response missing userErrors section in update_inventory_quantities. Response: {value}"
             ))?
             .as_array()
             .ok_or(format!(
-                "update_inventory_quantities response has unexpected format for userErrors"
+                "update_inventory_quantities response has unexpected format for userErrors. Response: {value}"
             ))?;
         if !errors.is_empty() {
             return Err(format!(
@@ -525,21 +525,21 @@ impl ShopifyController {
                 .map_err(|e| {
                     format!("Sending update_product_weights_cost_list request to shopify: {e:?}")
                 })?;
-            let value: serde_json::Value = serde_json::from_str(
-                &response
-                    .text()
-                    .await
-                    .map_err(|e| format!("Fetching shopify response text: {e:?}"))?,
-            )
-            .map_err(|e| format!("Parsing shopify response text: {e:?}"))?;
+            let response_text = response
+                .text()
+                .await
+                .map_err(|e| format!("Fetching shopify response text: {e:?}"))?;
+            let value: serde_json::Value = serde_json::from_str(&response_text).map_err(|e| {
+                format!("Parsing shopify response text: {e:?}. Response: {response_text}")
+            })?;
             let errors = value
                 .pointer("/data/productVariantsBulkUpdate/userErrors")
                 .ok_or(format!(
-                    "Shopify response missing userErrors section in update_product_weights_cost_list for {product_id}"
+                    "Shopify response missing userErrors section in update_product_weights_cost_list for {product_id}. Response: {value}"
                 ))?
                 .as_array()
                 .ok_or(format!(
-                    "update_product_weights_cost_list response has unexpected format for userErrors"
+                    "update_product_weights_cost_list response has unexpected format for userErrors for {product_id}. Response: {value}"
                 ))?;
             if !errors.is_empty() {
                 return Err(format!(
