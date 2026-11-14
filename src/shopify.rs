@@ -442,7 +442,112 @@ impl ShopifyController {
                 "Received error response from shopify with update_inventory_quantities request: {errors:?}"
             ));
         }
-        Ok(())
+        Ok(no_matching_shopify_product)
+    }
+
+    /// Updates each variant's list price, unit cost, and weight to match the ABC data.
+    ///
+    /// The mutation is scoped to a single product, so variant updates are grouped by
+    /// the product each matched variant belongs to. Only the fields provided are changed;
+    /// anything omitted is left untouched.
+    ///
+    /// https://shopify.dev/docs/api/admin-graphql/latest/mutations/productVariantsBulkUpdate
+    pub async fn update_product_weights_cost_list(
+        &self,
+        products: &[AbcProduct],
+    ) -> Result<Vec<AbcProduct>, String> {
+        const SET_PRICING_QUERY: &str = r#"
+            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+              productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: false) {
+                product {
+                  id
+                }
+                productVariants {
+                  id
+                  price
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+        "#;
+
+        let mut variants_by_product: HashMap<String, Vec<Value>> = HashMap::new();
+        let mut no_matching_shopify_product = Vec::new();
+        for product in products {
+            let barcode: BarcodeWrapper = product
+                .upcs()
+                .last()
+                .map(|g| g.to_string())
+                .unwrap_or(product.sku())
+                .into();
+            let Some((shopify_product, shopify_variant)) = self.products_by_barcode.get(&barcode)
+            else {
+                no_matching_shopify_product.push(product.clone());
+                continue;
+            };
+
+            let mut inventory_item = json!({
+                "cost": product.cost().to_string(),
+            });
+            if let Some(weight) = product.weight() {
+                // ABC reports weight in pounds.
+                inventory_item["measurement"] = json!({
+                    "weight": {
+                        "value": weight,
+                        "unit": "POUNDS",
+                    }
+                });
+            }
+
+            variants_by_product
+                .entry(shopify_product.id.clone())
+                .or_default()
+                .push(json!({
+                    "id": &shopify_variant.id,
+                    "price": product.list().to_string(),
+                    "inventoryItem": inventory_item,
+                }));
+        }
+
+        for (product_id, variants) in &variants_by_product {
+            let response = self
+                .shopify_query(json!({
+                    "query": SET_PRICING_QUERY,
+                    "variables": {
+                        "productId": product_id,
+                        "variants": variants,
+                    }
+                }))
+                .await
+                .map_err(|e| {
+                    format!("Sending update_product_weights_cost_list request to shopify: {e:?}")
+                })?;
+            let value: serde_json::Value = serde_json::from_str(
+                &response
+                    .text()
+                    .await
+                    .map_err(|e| format!("Fetching shopify response text: {e:?}"))?,
+            )
+            .map_err(|e| format!("Parsing shopify response text: {e:?}"))?;
+            let errors = value
+                .pointer("/data/productVariantsBulkUpdate/userErrors")
+                .ok_or(format!(
+                    "Shopify response missing userErrors section in update_product_weights_cost_list for {product_id}"
+                ))?
+                .as_array()
+                .ok_or(format!(
+                    "update_product_weights_cost_list response has unexpected format for userErrors"
+                ))?;
+            if !errors.is_empty() {
+                return Err(format!(
+                    "Received error response from shopify with update_product_weights_cost_list request for {product_id}: {errors:?}"
+                ));
+            }
+        }
+        Ok(no_matching_shopify_product)
     }
 }
 
