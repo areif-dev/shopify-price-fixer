@@ -53,7 +53,7 @@ impl Serialize for BarcodeWrapper {
 }
 
 pub trait UpdateListingTarget {
-    fn update(&self, products: &[AbcProduct]);
+    async fn update(&self, products: &[AbcProduct]) -> Result<(), String>;
 }
 
 pub trait CreateListingTarget {

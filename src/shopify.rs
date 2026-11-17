@@ -288,6 +288,7 @@ pub struct ShopifyController {
     api_version: String,
     shopify_access_token: String,
     products_by_barcode: HashMap<BarcodeWrapper, (ShopifyProduct, ShopifyProductVariant)>,
+    location_id: String,
 }
 
 impl ShopifyController {
@@ -356,7 +357,6 @@ impl ShopifyController {
 
     pub async fn update_inventory_quantities(
         &self,
-        location_id: &str,
         products: &[AbcProduct],
     ) -> Result<Vec<AbcProduct>, String> {
         // https://shopify.dev/docs/api/admin-graphql/latest/mutations/inventorySetQuantities?language=graphql
@@ -402,7 +402,7 @@ impl ShopifyController {
                 "inventoryItemId": &shopify_variant.inventory_item_id,
                 "changeFromQuantity": None::<i64>,
                 "quantity": stock_guard,
-                "locationId": location_id,
+                "locationId": &self.location_id,
             }));
         }
         let response = self
@@ -552,8 +552,10 @@ impl ShopifyController {
 }
 
 impl UpdateListingTarget for ShopifyController {
-    fn update(&self, products: &[abc_product::AbcProduct]) {
-        for product in products {}
+    async fn update(&self, products: &[abc_product::AbcProduct]) -> Result<(), String> {
+        self.update_inventory_quantities(products).await?;
+        self.update_product_weights_cost_list(products).await?;
+        Ok(())
     }
 }
 
@@ -575,6 +577,7 @@ mod tests {
             api_version: config.api_version,
             shopify_access_token: config.shopify_access_token,
             products_by_barcode: HashMap::new(),
+            location_id: config.location_id,
         };
         controller
             .fetch_products("status:active barcode:999999000088")
@@ -582,9 +585,41 @@ mod tests {
             .unwrap();
         let fix_products = [abc_products.get("99900008").unwrap().clone()];
         let no_matching_product = controller
-            .update_inventory_quantities(&config.location_id, &fix_products)
+            .update_inventory_quantities(&fix_products)
             .await
             .unwrap();
         assert!(no_matching_product.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_update_product_weights_cost_list() {
+        let config = Config::read().unwrap();
+        let abc_products = abc_product::AbcProduct::from_db_export(
+            "/home/aj/store-sync/item.data",
+            "/home/aj/store-sync/item_posted.data",
+        )
+        .unwrap();
+        let mut controller = ShopifyController {
+            business_url: config.business_url,
+            api_version: config.api_version,
+            shopify_access_token: config.shopify_access_token,
+            products_by_barcode: HashMap::new(),
+            location_id: config.location_id,
+        };
+        controller
+            .fetch_products("status:active barcode:999999000088")
+            .await
+            .unwrap();
+        let abc_product = abc_products.get("99900008").unwrap();
+        let fix_products = [abc_product.clone()];
+        let no_matching_product = controller
+            .update_product_weights_cost_list(&fix_products)
+            .await
+            .unwrap();
+        assert!(no_matching_product.is_empty());
+        controller
+            .fetch_products("status:active barcode:999999000088")
+            .await
+            .unwrap();
     }
 }
