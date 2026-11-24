@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use abc_product::AbcProduct;
 use reqwest::Client;
@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use simple_mass::Mass;
 use uuid::Uuid;
 
-use crate::{BarcodeWrapper, UpdateListingTarget};
+use crate::{BarcodeWrapper, FailedUpdate, FailureReason, UpdateListingTarget};
 
 const EXPORT_QUERY: &str = r#"
 query GetProductData($after: String, $query: String) {
@@ -153,6 +153,18 @@ fn edge_nodes<'a>(value: &'a Value, pointer: &str) -> Result<Vec<&'a Value>, Str
             edge.get("node")
                 .filter(|node| !node.is_null())
                 .ok_or(format!("Missing node at {pointer}/{index}"))
+        })
+        .collect()
+}
+
+/// Formats the `userErrors` of a Shopify mutation response into human-readable
+/// messages, falling back to the raw entry when no `message` field is present.
+fn user_error_messages(errors: &[Value]) -> Vec<String> {
+    errors
+        .iter()
+        .map(|error| match error["message"].as_str() {
+            Some(message) => format!("{message} ({error})"),
+            None => error.to_string(),
         })
         .collect()
 }
@@ -329,7 +341,7 @@ impl ShopifyController {
             let mut these_products = response.products;
             end_cursor = response.end_cursor;
             products.append(&mut these_products);
-            if let None = end_cursor {
+            if end_cursor.is_none() {
                 self.products_by_barcode = Self::organize_products(products);
                 return Ok(());
             };
@@ -358,7 +370,7 @@ impl ShopifyController {
     pub async fn update_inventory_quantities(
         &self,
         products: &[AbcProduct],
-    ) -> Result<Vec<AbcProduct>, String> {
+    ) -> Result<Vec<FailedUpdate>, String> {
         // https://shopify.dev/docs/api/admin-graphql/latest/mutations/inventorySetQuantities?language=graphql
         const SET_INVENTORY_QUERY: &str = r#"
             mutation inventorySetQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
@@ -380,7 +392,8 @@ impl ShopifyController {
             }
         "#;
         let mut quantities = Vec::new();
-        let mut no_matching_shopify_product = Vec::new();
+        let mut matched: Vec<&AbcProduct> = Vec::new();
+        let mut failures: Vec<FailedUpdate> = Vec::new();
         for product in products {
             let stock_guard = if product.stock().is_negative() {
                 0
@@ -395,15 +408,20 @@ impl ShopifyController {
                 .unwrap_or(product.sku())
                 .into();
             let Some((_, shopify_variant)) = self.products_by_barcode.get(&barcode) else {
-                no_matching_shopify_product.push(product.clone());
+                failures.push((product.clone(), FailureReason::NoListingMatch));
                 continue;
             };
+            matched.push(product);
             quantities.push(json!({
                 "inventoryItemId": &shopify_variant.inventory_item_id,
                 "changeFromQuantity": None::<i64>,
                 "quantity": stock_guard,
                 "locationId": &self.location_id,
             }));
+        }
+        // Nothing matched, so there is no mutation to send.
+        if quantities.is_empty() {
+            return Ok(failures);
         }
         let response = self
             .shopify_query(json!({
@@ -437,12 +455,19 @@ impl ShopifyController {
             .ok_or(format!(
                 "update_inventory_quantities response has unexpected format for userErrors. Response: {value}"
             ))?;
-        if !errors.is_empty() {
-            return Err(format!(
-                "Received error response from shopify with update_inventory_quantities request: {errors:?}"
-            ));
+        let messages = user_error_messages(errors);
+        if !messages.is_empty() {
+            // The mutation is all-or-nothing and its user errors cannot be
+            // attributed to individual quantities, so every matched product
+            // carries the same rejection.
+            let rejection = FailureReason::Rejected { messages };
+            failures.extend(
+                matched
+                    .into_iter()
+                    .map(|product| (product.clone(), rejection.clone())),
+            );
         }
-        Ok(no_matching_shopify_product)
+        Ok(failures)
     }
 
     /// Updates each variant's list price, unit cost, and weight to match the ABC data.
@@ -455,7 +480,7 @@ impl ShopifyController {
     pub async fn update_product_weights_cost_list(
         &self,
         products: &[AbcProduct],
-    ) -> Result<Vec<AbcProduct>, String> {
+    ) -> Result<Vec<FailedUpdate>, String> {
         const SET_PRICING_QUERY: &str = r#"
             mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
               productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: false) {
@@ -474,8 +499,15 @@ impl ShopifyController {
             }
         "#;
 
-        let mut variants_by_product: HashMap<String, Vec<Value>> = HashMap::new();
-        let mut no_matching_shopify_product = Vec::new();
+        /// The ABC products whose variants are updated in one Shopify product
+        /// mutation, along with the mutation payloads for those variants.
+        struct VariantBatch {
+            variants: Vec<Value>,
+            abc_products: Vec<AbcProduct>,
+        }
+
+        let mut variants_by_product: HashMap<String, VariantBatch> = HashMap::new();
+        let mut failures: Vec<FailedUpdate> = Vec::new();
         for product in products {
             let barcode: BarcodeWrapper = product
                 .upcs()
@@ -485,7 +517,7 @@ impl ShopifyController {
                 .into();
             let Some((shopify_product, shopify_variant)) = self.products_by_barcode.get(&barcode)
             else {
-                no_matching_shopify_product.push(product.clone());
+                failures.push((product.clone(), FailureReason::NoListingMatch));
                 continue;
             };
 
@@ -502,23 +534,27 @@ impl ShopifyController {
                 });
             }
 
-            variants_by_product
+            let batch = variants_by_product
                 .entry(shopify_product.id.clone())
-                .or_default()
-                .push(json!({
-                    "id": &shopify_variant.id,
-                    "price": product.list().to_string(),
-                    "inventoryItem": inventory_item,
-                }));
+                .or_insert_with(|| VariantBatch {
+                    variants: Vec::new(),
+                    abc_products: Vec::new(),
+                });
+            batch.variants.push(json!({
+                "id": &shopify_variant.id,
+                "price": product.list().to_string(),
+                "inventoryItem": inventory_item,
+            }));
+            batch.abc_products.push(product.clone());
         }
 
-        for (product_id, variants) in &variants_by_product {
+        for (product_id, batch) in &variants_by_product {
             let response = self
                 .shopify_query(json!({
                     "query": SET_PRICING_QUERY,
                     "variables": {
                         "productId": product_id,
-                        "variants": variants,
+                        "variants": &batch.variants,
                     }
                 }))
                 .await
@@ -541,21 +577,43 @@ impl ShopifyController {
                 .ok_or(format!(
                     "update_product_weights_cost_list response has unexpected format for userErrors for {product_id}. Response: {value}"
                 ))?;
-            if !errors.is_empty() {
-                return Err(format!(
-                    "Received error response from shopify with update_product_weights_cost_list request for {product_id}: {errors:?}"
-                ));
+            let messages = user_error_messages(errors);
+            if !messages.is_empty() {
+                // The mutation covers one Shopify product's variants and was
+                // rejected as a whole, so every ABC product in the batch
+                // carries the same rejection.
+                let rejection = FailureReason::Rejected { messages };
+                failures.extend(
+                    batch
+                        .abc_products
+                        .iter()
+                        .cloned()
+                        .map(|product| (product, rejection.clone())),
+                );
             }
         }
-        Ok(no_matching_shopify_product)
+        Ok(failures)
     }
 }
 
 impl UpdateListingTarget for ShopifyController {
-    async fn update(&self, products: &[abc_product::AbcProduct]) -> Result<(), String> {
-        self.update_inventory_quantities(products).await?;
-        self.update_product_weights_cost_list(products).await?;
-        Ok(())
+    async fn update(
+        &self,
+        products: &[abc_product::AbcProduct],
+    ) -> Result<Vec<FailedUpdate>, String> {
+        let mut failures = self.update_inventory_quantities(products).await?;
+        let pricing_failures = self.update_product_weights_cost_list(products).await?;
+
+        // A product can fail in both passes (e.g. no listing match);
+        // report each product's failure only once.
+        let mut reported: HashSet<String> = failures
+            .iter()
+            .map(|(product, _)| product.sku().clone())
+            .collect();
+        failures.extend(pricing_failures.into_iter().filter(|(product, _)| {
+            reported.insert(product.sku().clone())
+        }));
+        Ok(failures)
     }
 }
 
@@ -584,11 +642,11 @@ mod tests {
             .await
             .unwrap();
         let fix_products = [abc_products.get("99900008").unwrap().clone()];
-        let no_matching_product = controller
+        let failures = controller
             .update_inventory_quantities(&fix_products)
             .await
             .unwrap();
-        assert!(no_matching_product.is_empty());
+        assert!(failures.is_empty());
     }
 
     #[tokio::test]
@@ -612,11 +670,11 @@ mod tests {
             .unwrap();
         let abc_product = abc_products.get("99900008").unwrap();
         let fix_products = [abc_product.clone()];
-        let no_matching_product = controller
+        let failures = controller
             .update_product_weights_cost_list(&fix_products)
             .await
             .unwrap();
-        assert!(no_matching_product.is_empty());
+        assert!(failures.is_empty());
         controller
             .fetch_products("status:active barcode:999999000088")
             .await

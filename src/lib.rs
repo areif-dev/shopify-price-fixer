@@ -53,8 +53,35 @@ impl Serialize for BarcodeWrapper {
 }
 
 pub trait UpdateListingTarget {
-    async fn update(&self, products: &[AbcProduct]) -> Result<(), String>;
+    fn update(&self, products: &[AbcProduct]) -> impl Future<Output = Result<Vec<FailedUpdate>, String>>;
 }
+
+/// Why a single ABC product failed an operation against a listing target.
+///
+/// Per-product failures are collected and returned as the `Ok` payload of the
+/// update functions; wholesale failures (network errors, malformed responses)
+/// abort the whole operation and are returned as its `Err` instead.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FailureReason {
+    /// No listing matched the product's barcode, or its SKU when it has none.
+    NoListingMatch,
+    /// The target's mutation rejected the update. Its user errors could not be
+    /// attributed to individual products, so every product in the rejected
+    /// request carries the same messages.
+    Rejected { messages: Vec<String> },
+}
+
+impl std::fmt::Display for FailureReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoListingMatch => write!(f, "no listing matched this product"),
+            Self::Rejected { messages } => write!(f, "rejected by target: {messages:?}"),
+        }
+    }
+}
+
+/// An ABC product that failed an operation, paired with the reason it failed.
+pub type FailedUpdate = (AbcProduct, FailureReason);
 
 pub trait CreateListingTarget {
     fn create(&self, products: &[AbcProduct]);

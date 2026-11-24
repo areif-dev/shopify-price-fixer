@@ -25,9 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Attempt to remove any existing log files. If no logs exist, ignore the resulting error
-    match fs::remove_dir_all(parent_dir.join("logs")) {
-        _ => (),
-    }
+    let _ = fs::remove_dir_all(parent_dir.join("logs"));
 
     let abc_products = AbcProduct::from_db_export(&item_data_path, &posted_data_path)?;
     let previously_uploaded_skus = fetch_existing_skus(&cli.export_skus)?;
