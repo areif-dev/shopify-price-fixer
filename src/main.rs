@@ -4,11 +4,25 @@ use std::path::PathBuf;
 
 use abc_product::AbcProduct;
 use clap::Parser;
-use shopify_price_fixer::{self as fixer};
+use shopify_price_fixer::product::{match_identifiers, parse_identifiers};
+use shopify_price_fixer::{self as fixer, BarcodeWrapper};
 
-fn fetch_existing_skus(file: &PathBuf) -> Result<HashSet<String>, std::io::Error> {
+/// Reads export identifiers from a newline-separated file.
+///
+/// Blank lines are ignored and repeated identifiers are collapsed. Each line is
+/// parsed as a GTIN when possible, otherwise it is treated as an ABC SKU.
+///
+/// # Arguments
+/// * `file` - The path to the export identifiers file.
+///
+/// # Returns
+/// The unique GTIN or SKU identifiers from the file.
+///
+/// # Errors
+/// Returns an [`std::io::Error`] if the file cannot be read.
+fn fetch_export_identifiers(file: &PathBuf) -> Result<HashSet<BarcodeWrapper>, std::io::Error> {
     let text = fs::read_to_string(file)?;
-    Ok(text.lines().map(|l| l.trim().to_string()).collect())
+    Ok(parse_identifiers(&text))
 }
 
 #[tokio::main]
@@ -28,23 +42,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = fs::remove_dir_all(parent_dir.join("logs"));
 
     let abc_products = AbcProduct::from_db_export(&item_data_path, &posted_data_path)?;
-    let previously_uploaded_skus = fetch_existing_skus(&cli.export_skus)?;
+    let export_identifiers = fetch_export_identifiers(&cli.export_identifiers)?;
+    let matches = match_identifiers(&abc_products, &export_identifiers);
 
-    let mut missing_skus = Vec::new();
-    let mut acceptable_products = Vec::new();
-    for sku in previously_uploaded_skus {
-        let product = match abc_products.get(&sku) {
-            Some(p) => p,
-            None => {
-                missing_skus.push(sku.clone());
-                eprintln!("MISSING SKU: {}", sku);
-                continue;
-            }
-        };
-        acceptable_products.push(product.clone());
+    let logs_dir = parent_dir.join("logs");
+    fs::create_dir_all(&logs_dir)?;
+
+    if !matches.missing.is_empty() {
+        let contents: String = matches
+            .missing
+            .iter()
+            .map(|identifier| format!("{identifier}\n"))
+            .collect();
+        fs::write(logs_dir.join("missing-identifiers.txt"), contents)?;
+        for identifier in &matches.missing {
+            eprintln!("MISSING IDENTIFIER: {identifier}");
+        }
     }
 
-    //fs::write("existing.txt", written_products.as_bytes())?;
+    if !matches.duplicate_gtins.is_empty() {
+        let contents = format!("{:#?}\n", matches.duplicate_gtins);
+        fs::write(logs_dir.join("duplicate-gtins.txt"), contents)?;
+        for (gtin, products) in &matches.duplicate_gtins {
+            eprintln!(
+                "DUPLICATE GTIN: {gtin} is shared by {} ABC products",
+                products.len()
+            );
+        }
+    }
+
+    let _acceptable_products = matches.matched;
 
     Ok(())
 }

@@ -39,21 +39,29 @@ impl<'de> Deserialize<'de> for BarcodeWrapper {
     }
 }
 
+impl std::fmt::Display for BarcodeWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Gtin(g) => write!(f, "{g}"),
+            Self::String(s) => write!(f, "{s}"),
+        }
+    }
+}
+
 impl Serialize for BarcodeWrapper {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        let string = match self {
-            Self::Gtin(g) => g.to_string(),
-            Self::String(s) => s.to_owned(),
-        };
-        serializer.serialize_str(&string)
+        serializer.serialize_str(&self.to_string())
     }
 }
 
 pub trait UpdateListingTarget {
-    fn update(&self, products: &[AbcProduct]) -> impl Future<Output = Result<Vec<FailedUpdate>, String>>;
+    fn update(
+        &self,
+        products: &[AbcProduct],
+    ) -> impl Future<Output = Result<Vec<FailedUpdate>, String>>;
 }
 
 /// Why a single ABC product failed an operation against a listing target.
@@ -167,10 +175,10 @@ pub struct Cli {
     )]
     pub posted_data: String,
 
-    /// The path to the file containing a new line separated list of SKUs to try pulling from the
-    /// ABC data and uploading to Catalyst
-    #[arg(short, long, default_value = "export-skus.txt")]
-    pub export_skus: PathBuf,
+    /// The path to the file containing a newline-separated list of GTIN barcodes or SKUs to try
+    /// pulling from the ABC data and uploading to the configured export target
+    #[arg(short, long, default_value = "export-identifiers.txt")]
+    pub export_identifiers: PathBuf,
 
     /// Which provider to export ABC products to
     #[arg(short, long, default_value = "Shopify")]
